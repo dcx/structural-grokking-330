@@ -1,0 +1,6 @@
+.DS_STORE
+*.pyc
+__pycache__
+wandb
+nohup.out
+.vscode

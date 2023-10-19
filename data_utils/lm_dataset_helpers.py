@@ -21,7 +21,7 @@ def read_lm_data(splits, do_process=True):
     index_map = {split: [] for split in splits}
     for split in splits:
         with open(
-            "{}/question_formation_data/question.{}".format(DATA_DIR, split),
+            "{}/data_utils/question_formation_data/question.{}".format(DATA_DIR, split),
             "r",
         ) as reader:
             if do_process:

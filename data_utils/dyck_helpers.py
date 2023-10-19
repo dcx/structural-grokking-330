@@ -9,7 +9,7 @@ from util import test_continuations
 
 
 ## CHANGE THIS FOR YOUR PROJECT (cannot use os.getcwd() because of hydra)
-DATA_DIR = "/u/scr/smurty/structural_grokking/data_utils"
+DATA_DIR = "data_utils"
 
 
 def read_dyck_data(splits, vocab_size):
