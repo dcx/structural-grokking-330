@@ -72,10 +72,9 @@ def get_base_transformer_lm(args, in_vocab, model_name=None):
 
 
 def main_lm(args):
+    # DC: ? I think this must be debug code
     language_model = False
     out_vocab = CharVocabulary(chars=set('0123456789'))
-
-
 
 
     if args.dataset == "dyck":

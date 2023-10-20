@@ -103,7 +103,7 @@ class TransformerEncDecInterface(ModelInterface):
         else:
             in_len = data["in_len"].long()
             in_with_eos = add_eos(
-                data["in"].transpose(0, 1), data["in_len"], self.model.encoder_eos
+                data["in"], in_len, self.model.encoder_eos
             ).transpose(0, 1)
             in_len += 1
             out_with_eos = None
@@ -132,8 +132,9 @@ class TransformerEncDecInterface(ModelInterface):
                 mask_logits, None, (loss.sum() / len_mask.sum())
             )
         elif self.model.mode == "classifier":
+            labels = data['labels'].long() # DC: Why does this get autoconverted to a float between dataset and dataloader? (something about the collate_fn is sus)
             logits = res
-            loss = layers.cross_entropy(logits, data["labels"], reduction="none")
+            loss = layers.cross_entropy(logits, labels, reduction="none")
             return EncoderDecoderResult(logits, None, loss.mean())
         else:
             res.data = res.data.transpose(0, 1)

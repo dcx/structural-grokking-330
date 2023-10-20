@@ -58,9 +58,9 @@ def build_dataset_addmult_mod10(
     dataset = dataset.map(lambda example, idx: {  
         'in': tokenizer(example['example']),
         'in_len': len(tokenizer(example['example'])),
-        'out_len': 1,
-        'out': example['ans_mod10'],
-        'label': example['ans_mod10'],
+        #'out_len': 1,
+        #'out': example['ans_mod10'],
+        'labels': example['ans_mod10'],
         'idxs': idx,
     }, with_indices=True,
     remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
