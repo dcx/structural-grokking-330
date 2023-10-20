@@ -1,0 +1,110 @@
+from typing import Tuple, Optional
+from datasets import load_dataset, DatasetDict
+from vocabulary import CharVocabulary
+import torch
+
+
+def build_dataset_addmult_mod10(
+    data_file: str, 
+    max_tree_height: int = 4, 
+    max_tree_width: int = 80, 
+    held: Optional[str] = None, 
+    remainder: Optional[str] = None
+) -> Tuple[DatasetDict, CharVocabulary]:
+    """
+    Build an addmult mod10 dataset with specific constraints and tokenize the examples.
+
+    This function loads a dataset from a CSV file, filters examples based on certain conditions,
+    splits the dataset into training, validation, and test subsets, and tokenizes the examples
+    using a character vocabulary. The tokenization is based on a specific set of characters
+    relevant to the dataset.
+
+    Parameters:
+    data_file (str): The path to the CSV file to load the dataset from.
+    max_tree_height (int): The maximum height for the trees in the dataset.
+    max_tree_width (int): The maximum width for the trees in the dataset.
+    held (Optional[str]): A string to filter examples that contain this substring. If None, no filtering is applied.
+    remainder (Optional[str]): A string to filter examples that do not contain this substring. If None, no filtering is applied.
+
+    Returns:
+    Tuple[DatasetDict, CharVocabulary]: A tuple containing the processed huggingface dataset and the tokenizer used.
+    """
+
+    # Load dataset
+    dataset = load_dataset("csv", data_files=data_file, split="all")
+
+    # filter to specific sizes
+    # max height 4
+    dataset = dataset.filter(lambda example: example['height'] <= 4)
+    # max width 80
+    dataset = dataset.filter(lambda example: example['width'] <= 80)
+
+    # demo: hold out examples with a certain string (we aren't doing this yet)
+    dataset_held = dataset.filter(lambda example: '*3' in example['example'])
+    dataset_remainder = dataset.filter(lambda example: '*3' not in example['example'])
+
+    # split into train, val, test
+    train_testval = dataset.train_test_split(test_size=0.2, shuffle=False)
+    test_val = train_testval['test'].train_test_split(test_size=0.5, shuffle=False)
+    dataset = DatasetDict({
+        'train': train_testval['train'],
+        'val': test_val['test'],
+        'test': test_val['train']
+    })
+
+    tokenizer = CharVocabulary(chars=set('0123456789+*()'))
+    dataset = dataset.map(lambda example, idx: {  
+        'in': tokenizer(example['example']),
+        'in_len': len(tokenizer(example['example'])),
+        'out_len': 1,
+        'out': example['ans_mod10'],
+        'label': example['ans_mod10'],
+        'idxs': idx,
+    }, with_indices=True,
+    remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
+
+    # optionally: add arg above to remove the unnecessary columns:
+    # remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
+
+    return dataset, tokenizer
+
+
+
+def eval_callback_mod10(model, in_vocab, split, datasets):
+    """PROTOTYPE. Not finished"""
+    # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
+    # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
+    data = datasets[split]
+
+    # Initialize counters
+    total_count = 0
+    correct_count = 0
+
+    # Set the model to evaluation mode
+    model.eval()
+
+    with torch.no_grad():  # Disable gradient calculations during evaluation
+        for item in data:
+            # Extract the expression and the actual modulo 10 result
+            expression, actual_mod10 = item['example'], int(item['ans_mod10'])
+
+            # Prepare the model input: tokenize the input expression
+            # This part might vary depending on your model's expected input format
+            input_ids = torch.tensor([in_vocab(expression)], dtype=torch.long)
+
+            # Move tensors to the same device as the model
+            input_ids = input_ids.to(model.device)
+
+            # Get the model's predictions
+            outputs = model(input_ids)
+            _, predicted_class = torch.max(outputs, dim=1)  # Assuming the output is unnormalized scores/logits
+
+            # Update counters
+            total_count += 1
+            if predicted_class.item() == actual_mod10:
+                correct_count += 1
+
+    # Calculate accuracy
+    accuracy = correct_count / total_count
+    print(f'Accuracy on {split} data: {accuracy:.2f}')
+    return accuracy

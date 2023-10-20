@@ -1,3 +1,4 @@
 from .dyck_helpers import build_datasets_dyck
 from .lm_dataset_helpers import build_datasets_lm
 from .tense_inflection_helpers import build_datasets_tense_inflection
+from .ds_addmult_mod10_helpers import build_dataset_addmult_mod10
