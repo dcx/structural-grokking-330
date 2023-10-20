@@ -9,12 +9,18 @@ import argparse
 from data_utils import (
     build_datasets_lm,
     build_datasets_tense_inflection,
+    build_dataset_addmult_mod10
 )
 from transformer_helpers import *
 import torch.nn.functional as F
 from data_utils.lm_dataset_helpers import eval_lm_callback
 from data_utils.tense_inflection_helpers import eval_callback_tense_inflection
+from data_utils.ds_addmult_mod10_helpers import eval_callback_mod10
 
+from vocabulary import CharVocabulary
+
+
+DS_ADDMULT_DATASET = "data_utils/ds_addmult_mod10/data-addmult-231019.csv"
 
 ### Change this for your own system as appropriate
 def working_dir():
@@ -66,16 +72,29 @@ def get_base_transformer_lm(args, in_vocab, model_name=None):
 
 
 def main_lm(args):
+    language_model = False
+    out_vocab = CharVocabulary(chars=set('0123456789'))
+
+
+
+
     if args.dataset == "dyck":
         datasets, in_vocab, _ = build_datasets_dyck(vocab=args.dyck_vocab)
     elif args.dataset == "tense":
         datasets, in_vocab, _ = build_datasets_tense_inflection()
+    elif args.dataset == "ds-addmult-mod10":
+        datasets, in_vocab = build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
     else:
         datasets, in_vocab, _ = build_datasets_lm()
 
-    model, interface = get_base_transformer_lm(
-        args, in_vocab, model_name=args.model_load_path
-    )
+    if language_model:
+        model, interface = get_base_transformer_lm(
+            args, in_vocab, model_name=args.model_load_path
+        )
+    else:
+        # Want to use base transformer model
+        model, interface = get_base_transformer_model(args, in_vocab, out_vocab)
+
     if args.callback:
         if args.dataset == "lm":
             callback_fn = lambda split: eval_lm_callback(model, in_vocab, split)
@@ -83,6 +102,8 @@ def main_lm(args):
             callback_fn = lambda split: eval_callback_tense_inflection(
                 model, in_vocab, split
             )
+        elif args.dataset == "ds-addmult-mod10":
+            callback_fn = lambda split: eval_callback_mod10(model, in_vocab, split, datasets)
         elif args.dataset == "dyck":
             callback_fn = lambda split: eval_callback_dyck(model, in_vocab, split)
         else:
