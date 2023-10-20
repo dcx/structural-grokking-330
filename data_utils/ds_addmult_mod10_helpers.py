@@ -35,13 +35,15 @@ def build_dataset_addmult_mod10(
 
     # filter to specific sizes
     # max height 4
-    dataset = dataset.filter(lambda example: example['height'] <= 4)
+    dataset = dataset.filter(lambda example: example['height'] <= max_tree_height)
     # max width 80
-    dataset = dataset.filter(lambda example: example['width'] <= 80)
+    dataset = dataset.filter(lambda example: example['width'] <= max_tree_width)
 
     # demo: hold out examples with a certain string (we aren't doing this yet)
-    dataset_held = dataset.filter(lambda example: '*3' in example['example'])
-    dataset_remainder = dataset.filter(lambda example: '*3' not in example['example'])
+    if held:
+        dataset_held = dataset.filter(lambda example: held in example['example'])
+    if remainder:
+        dataset_remainder = dataset.filter(lambda example: remainder not in example['example'])
 
     # split into train, val, test
     train_testval = dataset.train_test_split(test_size=0.2, shuffle=False)
