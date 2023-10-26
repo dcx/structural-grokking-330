@@ -2,6 +2,13 @@ from typing import Tuple, Optional
 from datasets import load_dataset, DatasetDict
 from vocabulary import CharVocabulary
 import torch
+from torch.utils.data import (
+    DataLoader,
+    RandomSampler,
+    SequentialSampler,
+)
+import collate
+from tqdm import tqdm
 
 
 def build_dataset_addmult_mod10(
@@ -83,28 +90,33 @@ def eval_callback_mod10(model, in_vocab, split, datasets):
     correct_count = 0
 
     # Set the model to evaluation mode
+    eval_data_collator = collate.VarLengthCollate(None)
     model.eval()
 
     with torch.no_grad():  # Disable gradient calculations during evaluation
-        for item in data:
-            # Extract the expression and the actual modulo 10 result
-            expression, actual_mod10 = item['example'], int(item['ans_mod10'])
+        eval_batch_size = 8
+        eval_dataloader = DataLoader(
+            data,
+            sampler=SequentialSampler(data),
+            batch_size=eval_batch_size,
+            collate_fn=eval_data_collator,
+        )
 
-            # Prepare the model input: tokenize the input expression
-            # This part might vary depending on your model's expected input format
-            input_ids = torch.tensor([in_vocab(expression)], dtype=torch.long)
-
+        for batch in tqdm(eval_dataloader):
             # Move tensors to the same device as the model
-            input_ids = input_ids.to(model.device)
+            device = next(model.parameters()).device
+            input = batch['in'].transpose(0,1).to(device)
+            input_len = batch['in_len'].long().to(device)
+            label = batch['labels'].long().to(device)
 
             # Get the model's predictions
-            outputs = model(input_ids)
-            _, predicted_class = torch.max(outputs, dim=1)  # Assuming the output is unnormalized scores/logits
+            outputs = model(input, input_len, None, None, None)
+            _, predicted_class = torch.max(outputs, dim=1)
 
-            # Update counters
-            total_count += 1
-            if predicted_class.item() == actual_mod10:
-                correct_count += 1
+            # Update accuracy counters
+            total_count += label.size(0)
+            correct_count += (predicted_class == label).sum().item()
+
 
     # Calculate accuracy
     accuracy = correct_count / total_count
