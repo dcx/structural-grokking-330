@@ -22,10 +22,14 @@ class RelativeTransformerEncoderLayer(torch.nn.Module):
         self.dropout1 = torch.nn.Dropout(dropout)
         self.dropout2 = torch.nn.Dropout(dropout)
 
+        self.d_model = d_model
+
         self.activation = activation
         self.reset_parameters()
 
-    def forward(self, src: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, src: torch.Tensor, mask: Optional[torch.Tensor] = None, **kwargs) -> torch.Tensor:
+                          
+        # print('here')
         src2 = self.self_attn(src, src, AttentionMask(mask, None))
         src = src + self.dropout1(src2)
         src = self.norm1(src)
@@ -86,7 +90,7 @@ class RelativeTransformerDecoderLayer(torch.nn.Module):
 class RelativeTransformer(Transformer):
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
-                 activation: ActivationFunction = F.relu):
+                 activation: ActivationFunction = F.relu, **kwargs):
 
         super().__init__(d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, activation,
                          TransformerEncoderWithLayer(RelativeTransformerEncoderLayer),

@@ -214,6 +214,7 @@ def train_loop(
     best_ppl = {key: 10000.0 for key in val_datasets}
 
     while True:
+        # print(train_dataset)
         train_dataloader = DataLoader(
             train_dataset,
             sampler=RandomSampler(train_dataset),
@@ -284,13 +285,13 @@ def train_loop(
                             }
                             wandb.log(wandbdict)
 
-                        if len(save_dir) > 0:
-                            torch.save(
-                                model.model.state_dict(),
-                                os.path.join(
-                                    save_dir, "checkpoint_{}.pickle".format(num_steps)
-                                ),
-                            )
+                        # if len(save_dir) > 0:
+                        #     torch.save(
+                        #         model.model.state_dict(),
+                        #         os.path.join(
+                        #             save_dir, "checkpoint_{}.pickle".format(num_steps)
+                        #         ),
+                        #     )
                     if num_steps > max_steps:
                         break
             if losses:
