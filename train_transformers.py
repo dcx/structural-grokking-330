@@ -3,6 +3,7 @@ import random
 import os
 import torch
 from data_utils.dyck_helpers import build_datasets_dyck, eval_callback_dyck
+from data_utils.ds_addmult_mod10_helpers import build_dataset_addmult_mod10_lm
 from training_utils import *
 
 import argparse
@@ -15,7 +16,7 @@ from transformer_helpers import *
 import torch.nn.functional as F
 from data_utils.lm_dataset_helpers import eval_lm_callback
 from data_utils.tense_inflection_helpers import eval_callback_tense_inflection
-from data_utils.ds_addmult_mod10_helpers import eval_callback_mod10
+from data_utils.ds_addmult_mod10_helpers import eval_callback_mod10, eval_callback_mod10_lm
 
 from vocabulary import CharVocabulary
 
@@ -54,6 +55,8 @@ def get_base_transformer_model(
         args.encoder_n_layers,
         args.decoder_n_layers,
         mode=args.mode,
+        relative=args.relative,
+        is_null_encoder=args.enc
     )
     if model_name:
         print("loading pretrained model from {}".format(model_name))
@@ -73,7 +76,7 @@ def get_base_transformer_lm(args, in_vocab, model_name=None):
 
 def main_lm(args):
     # DC: ? I think this must be debug code
-    language_model = False
+    language_model = args.lm
     out_vocab = CharVocabulary(chars=set('0123456789'))
 
 
@@ -82,7 +85,10 @@ def main_lm(args):
     elif args.dataset == "tense":
         datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
-        datasets, in_vocab = build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
+        if (language_model):
+            datasets, in_vocab = build_dataset_addmult_mod10_lm(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
+        else:
+            datasets, in_vocab = build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
     else:
         datasets, in_vocab, _ = build_datasets_lm()
 
@@ -102,7 +108,10 @@ def main_lm(args):
                 model, in_vocab, split
             )
         elif args.dataset == "ds-addmult-mod10":
-            callback_fn = lambda split: eval_callback_mod10(model, in_vocab, split, datasets)
+            if (language_model):
+                callback_fn = lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets)
+            else:
+                callback_fn = lambda split: eval_callback_mod10(model, in_vocab, split, datasets)
         elif args.dataset == "dyck":
             callback_fn = lambda split: eval_callback_dyck(model, in_vocab, split)
         else:
@@ -152,6 +161,9 @@ if __name__ == "__main__":
     parser.add_argument("--decoder_n_layers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--relative", type=bool, default=False)
+    parser.add_argument("--lm", type=bool, default=False)
+    parser.add_argument("--enc", type=bool, default=False)
     # this is only used if args.dataset == pcfg
     parser.add_argument("--base_folder", type=str, default="m-pcfgset")
     parser.add_argument("--tree_transform", action="store_true")

@@ -26,8 +26,9 @@ def create_model(
     decoder_n_layers,
     is_null_encoder=False,
     mode="enc_dec",
+    relative=False
 ) -> torch.nn.Module:
-    args = dict(embedding_init="xavier", scale_mode="opennmt", mode=mode)
+    args = dict(embedding_init="xavier", scale_mode="opennmt", mode=mode, relative=relative)
     if is_null_encoder:
         return TransformerDecModel(
             in_vocab_size,

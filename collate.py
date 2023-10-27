@@ -38,6 +38,7 @@ class VarLengthCollate:
         return out
 
     def __call__(self, batch):
+        # print(type(batch[0]))
         if isinstance(batch[0], dict):
             return {k: self([b[k] for b in batch]) for k in batch[0].keys()}
         elif isinstance(batch[0], np.ndarray):

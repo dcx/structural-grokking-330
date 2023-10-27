@@ -5,7 +5,7 @@ import os
 import wandb
 
 ### NOTE: change this to your own wandb project and entity!
-wandb.init(project="research-cs330", entity="mcgrathk")
+wandb.init(project="structural-grokking", entity="tgk-ananjan")
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
 
@@ -66,7 +66,7 @@ def get_opt(lr, model):
 
 
 def get_scheduler(opt, t_total):
-    num_warmup_steps = 10000
+    num_warmup_steps = 100
     scheduler = get_linear_schedule_with_warmup(
         opt, num_warmup_steps=num_warmup_steps, num_training_steps=t_total
     )
@@ -200,8 +200,8 @@ def train_loop(
     max_grad_norm = 1
     train_batch_size = 8
     accum_steps = 1
-    eval_every = 10000
-    max_steps = 2000000
+    eval_every = 1000
+    max_steps = 1000000
 
     opt = get_opt(args.lr, model)
     scheduler = get_scheduler(opt, max_steps)
@@ -214,6 +214,7 @@ def train_loop(
     best_ppl = {key: 10000.0 for key in val_datasets}
 
     while True:
+        # print(train_dataset)
         train_dataloader = DataLoader(
             train_dataset,
             sampler=RandomSampler(train_dataset),
@@ -261,17 +262,18 @@ def train_loop(
                     losses = []
                     if num_steps % eval_every == 0:
                         print("Evaluating at step {}".format(num_steps))
-                        best_ppl, curr_ppl = eval_callback(
-                            args,
-                            model,
-                            val_datasets,
-                            tokenizer,
-                            best_ppl,
-                            device,
-                            num_steps,
-                            train_data_collator,
-                        )
-                        print(curr_ppl)
+                        if model.model.mode == "lm":
+                            best_ppl, curr_ppl = eval_callback(
+                                args,
+                                model,
+                                val_datasets,
+                                tokenizer,
+                                best_ppl,
+                                device,
+                                num_steps,
+                                train_data_collator,
+                            )
+                            print(curr_ppl)
                         if callback_fn is not None:
                             val_score = callback_fn("val")
                             test_score = callback_fn("test")
@@ -283,13 +285,13 @@ def train_loop(
                             }
                             wandb.log(wandbdict)
 
-                        if len(save_dir) > 0:
-                            torch.save(
-                                model.model.state_dict(),
-                                os.path.join(
-                                    save_dir, "checkpoint_{}.pickle".format(num_steps)
-                                ),
-                            )
+                        # if len(save_dir) > 0:
+                        #     torch.save(
+                        #         model.model.state_dict(),
+                        #         os.path.join(
+                        #             save_dir, "checkpoint_{}.pickle".format(num_steps)
+                        #         ),
+                        #     )
                     if num_steps > max_steps:
                         break
             if losses:

@@ -46,6 +46,7 @@ def build_datasets_lm():
     dataset = {}
     for split in splits:
         in_subset = get_subset(in_sentences, index_map[split])
+        print(in_subset)
         in_subset_tokenized = [in_vocab(s) for s in in_subset]
         in_lens = [len(s) for s in in_subset_tokenized]
         data = {
