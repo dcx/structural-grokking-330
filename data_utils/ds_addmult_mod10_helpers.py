@@ -9,10 +9,7 @@ from torch.utils.data import (
 )
 import collate
 from tqdm import tqdm
-<<<<<<< HEAD
 from util import test_continuations
-=======
->>>>>>> 5f4cf70a0c15bb2838b81ecfd04c5aad98a5be8b
 
 
 def build_dataset_addmult_mod10(

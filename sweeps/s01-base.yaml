@@ -1,0 +1,32 @@
+# basic capability sweep
+# > wandb sweep --project 330 sweeps/s01-base.yaml
+
+program: train_transformers.py
+method: random
+
+metric: # not required for random search
+  name: val_aux
+  goal: maximize
+
+parameters:
+  dataset:
+    value: "ds-addmult-mod10"
+  save_dir:
+    value: "temp/"
+  encoder_n_layers:
+    values: [3, 4, 6, 8]
+  vec_dim:
+    values: [128, 256, 512, 768]
+  n_heads:
+    values: [2, 4, 6, 8]
+  lr:
+    values: [1e-3, 1e-4, 1e-5]
+  lm:
+    value: True
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--callback"
+  - ${args}
