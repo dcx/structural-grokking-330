@@ -66,7 +66,7 @@ def get_opt(lr, model):
 
 
 def get_scheduler(opt, t_total):
-    num_warmup_steps = 100
+    num_warmup_steps = 10000
     scheduler = get_linear_schedule_with_warmup(
         opt, num_warmup_steps=num_warmup_steps, num_training_steps=t_total
     )
@@ -200,7 +200,7 @@ def train_loop(
     max_grad_norm = 1
     train_batch_size = 8
     accum_steps = 1
-    eval_every = 2500
+    eval_every = 10000
     max_steps = 2000000
 
     opt = get_opt(args.lr, model)
