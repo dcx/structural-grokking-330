@@ -4,12 +4,6 @@ from tqdm import tqdm
 import os
 import wandb
 
-### NOTE: change this to your own wandb project and entity!
-<<<<<<< HEAD
-wandb.init(project="structural-grokking", entity="tgk-ananjan")
-=======
-wandb.init(project="330", entity="dcx")
->>>>>>> 5f4cf70a0c15bb2838b81ecfd04c5aad98a5be8b
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
 
@@ -204,13 +198,8 @@ def train_loop(
     max_grad_norm = 1
     train_batch_size = 8
     accum_steps = 1
-<<<<<<< HEAD
-    eval_every = 1000
-    max_steps = 1000000
-=======
     eval_every = 2500
     max_steps = 2000000
->>>>>>> 5f4cf70a0c15bb2838b81ecfd04c5aad98a5be8b
 
     opt = get_opt(args.lr, model)
     scheduler = get_scheduler(opt, max_steps)
