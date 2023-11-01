@@ -314,7 +314,7 @@ class Logger:
         if self.use_tb:
             from torch.utils.tensorboard import SummaryWriter
             os.makedirs(self.tb_logdir, exist_ok=True)
-            self.summary_writer = SummaryWriter(log_dir=self.tb_logdir, flush_secs=30)
+            self.summary_writer = SummaryWriter(save_dir=self.tb_logdir, flush_secs=30)
         else:
             self.summary_writer = None
 
