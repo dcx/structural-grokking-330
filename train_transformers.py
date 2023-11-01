@@ -245,8 +245,9 @@ def validate_args(args):
     # Check model_load_path and eval_only conditions
     if args.model_load_path:
         if not args.eval_only:
-            raise ValueError(
-                "Eval only must be set to true to evaluate network")
+            print("WARNING: Not evaluating, resuming training at loaded model checkpoint")
+        else:
+            print("INFO: Evaluating model, no training will occur")
     elif args.eval_only:
         raise ValueError("Must specify --model_load_path before evaluating")
 
