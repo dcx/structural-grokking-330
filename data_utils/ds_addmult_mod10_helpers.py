@@ -17,7 +17,8 @@ def build_dataset_addmult_mod10(
     max_tree_height: int = 4, 
     max_tree_width: int = 80, 
     held: Optional[str] = None, 
-    remainder: Optional[str] = None
+    remainder: Optional[str] = None,
+    lm_mode: bool = False
 ) -> Tuple[DatasetDict, CharVocabulary]:
     """
     Build an addmult mod10 dataset with specific constraints and tokenize the examples.
@@ -62,86 +63,23 @@ def build_dataset_addmult_mod10(
         'test': test_val['train']
     })
 
-    tokenizer = CharVocabulary(chars=set('0123456789+*()'))
-    dataset = dataset.map(lambda example, idx: {  
-        'in': tokenizer(example['example']),
-        'in_len': len(tokenizer(example['example'])),
-        #'out_len': 1,
-        #'out': example['ans_mod10'],
-        'labels': example['ans_mod10'],
-        'idxs': idx,
-    }, with_indices=True,
-    remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
-
-    # optionally: add arg above to remove the unnecessary columns:
-    # remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
-
-    return dataset, tokenizer
-
-def build_dataset_addmult_mod10_lm(
-    data_file: str, 
-    max_tree_height: int = 4, 
-    max_tree_width: int = 80, 
-    held: Optional[str] = None, 
-    remainder: Optional[str] = None
-) -> Tuple[DatasetDict, CharVocabulary]:
-    """
-    Build an addmult mod10 dataset with specific constraints and tokenize the examples.
-
-    This function loads a dataset from a CSV file, filters examples based on certain conditions,
-    splits the dataset into training, validation, and test subsets, and tokenizes the examples
-    using a character vocabulary. The tokenization is based on a specific set of characters
-    relevant to the dataset. The datasets are processed for the LM task. 
-
-    Parameters:
-    data_file (str): The path to the CSV file to load the dataset from.
-    max_tree_height (int): The maximum height for the trees in the dataset.
-    max_tree_width (int): The maximum width for the trees in the dataset.
-    held (Optional[str]): A string to filter examples that contain this substring. If None, no filtering is applied.
-    remainder (Optional[str]): A string to filter examples that do not contain this substring. If None, no filtering is applied.
-
-    Returns:
-    Tuple[DatasetDict, CharVocabulary]: A tuple containing the processed huggingface dataset and the tokenizer used.
-    """
-
-    # Load dataset
-    dataset = load_dataset("csv", data_files=data_file, split="all")
-
-    # filter to specific sizes
-    # max height 4
-    dataset = dataset.filter(lambda example: example['height'] <= max_tree_height)
-    # max width 80
-    dataset = dataset.filter(lambda example: example['width'] <= max_tree_width)
-
-    # demo: hold out examples with a certain string (we aren't doing this yet)
-    if held:
-        dataset_held = dataset.filter(lambda example: held in example['example'])
-    if remainder:
-        dataset_remainder = dataset.filter(lambda example: remainder not in example['example'])
-
-    # split into train, val, test
-    train_testval = dataset.train_test_split(test_size=0.2, shuffle=False)
-    test_val = train_testval['test'].train_test_split(test_size=0.5, shuffle=False)
-    dataset = DatasetDict({
-        'train': train_testval['train'],
-        'val': test_val['test'],
-        'test': test_val['train']
-    })
-
     tokenizer = CharVocabulary(chars=set('0123456789+*()='))
-    dataset = dataset.map(lambda example, idx: {  
-        'in': tokenizer(example['example'] + '=' + str(example['ans_mod10'])),
-        'in_len': len(tokenizer(example['example'] + '=' + str(example['ans_mod10']))),
-        # 'str': example['example'] + '=' + str(example['ans_mod10']),
-        #'out_len': 1,
-        #'out': example['ans_mod10'],
-        # 'labels': example['ans_mod10'],
-        'idxs': idx,
-    }, with_indices=True,
-    remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
-
-    # optionally: add arg above to remove the unnecessary columns:
-    # remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
+    remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10']
+    if lm_mode:
+        dataset = dataset.map(lambda example, idx: {  
+            'in': tokenizer(example['example'] + '=' + str(example['ans_mod10'])),
+            'in_len': len(tokenizer(example['example'] + '=' + str(example['ans_mod10']))),
+            'idxs': idx,
+        }, with_indices=True,
+        remove_columns=remove_columns)
+    else:
+        dataset = dataset.map(lambda example, idx: {  
+            'in': tokenizer(example['example']),
+            'in_len': len(tokenizer(example['example'])),
+            'labels': example['ans_mod10'],
+            'idxs': idx,
+        }, with_indices=True,
+        remove_columns=remove_columns)
 
     return dataset, tokenizer
 

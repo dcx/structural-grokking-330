@@ -3,7 +3,7 @@ import random
 import os
 import torch
 from data_utils.dyck_helpers import build_datasets_dyck, eval_callback_dyck
-from data_utils.ds_addmult_mod10_helpers import build_dataset_addmult_mod10_lm
+from data_utils.ds_addmult_mod10_helpers import build_dataset_addmult_mod10
 from training_utils import *
 
 import argparse
@@ -85,10 +85,7 @@ def main_lm(args):
     elif args.dataset == "tense":
         datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
-        if (language_model):
-            datasets, in_vocab = build_dataset_addmult_mod10_lm(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
-        else:
-            datasets, in_vocab = build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
+        datasets, in_vocab = build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80, lm_mode=True)
     else:
         datasets, in_vocab, _ = build_datasets_lm()
 
