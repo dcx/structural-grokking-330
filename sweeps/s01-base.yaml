@@ -14,15 +14,18 @@ parameters:
   save_dir:
     value: "temp/"
   encoder_n_layers:
-    values: [3, 4, 6, 8]
+    value: 6
   vec_dim:
-    values: [128, 256, 512, 768]
+    value: 512
   n_heads:
-    values: [2, 4, 6, 8]
+    value: 4
   lr:
-    values: [1e-3, 1e-4, 1e-5]
+    value: 2e-4
   lm:
     value: True
+  weight_decay:
+    min: 0.0
+    max: 0.5
 
 command:
   - ${env}
