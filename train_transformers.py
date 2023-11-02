@@ -165,7 +165,7 @@ if __name__ == "__main__":
     parser.add_argument("--decoder_n_layers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--eval_every", type=int, default=1000)
     parser.add_argument("--max_train_steps", type=int, default=20000)
