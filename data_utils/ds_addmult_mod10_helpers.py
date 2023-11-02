@@ -14,11 +14,11 @@ from util import test_continuations
 
 def build_dataset_addmult_mod10(
     data_file: str, 
+    min_tree_height: int = 1,
     max_tree_height: int = 4, 
     max_tree_width: int = 80, 
-    held: Optional[str] = None, 
-    remainder: Optional[str] = None,
-    lm_mode: bool = False
+    hold_out_n_unique_examples: int = 0,
+    lm_mode: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
     """
     Build an addmult mod10 dataset with specific constraints and tokenize the examples.
@@ -32,8 +32,8 @@ def build_dataset_addmult_mod10(
     data_file (str): The path to the CSV file to load the dataset from.
     max_tree_height (int): The maximum height for the trees in the dataset.
     max_tree_width (int): The maximum width for the trees in the dataset.
-    held (Optional[str]): A string to filter examples that contain this substring. If None, no filtering is applied.
-    remainder (Optional[str]): A string to filter examples that do not contain this substring. If None, no filtering is applied.
+    hold_out_n_unique_examples (int): Take this many unique examples and use them as the test set.
+    make_unique (bool): If True, before doing anything else, drop all duplicate examples from the dataset.
 
     Returns:
     Tuple[DatasetDict, CharVocabulary]: A tuple containing the processed huggingface dataset and the tokenizer used.
@@ -42,25 +42,43 @@ def build_dataset_addmult_mod10(
     # Load dataset
     dataset = load_dataset("csv", data_files=data_file, split="all")
 
-    # filter to specific sizes
+    # Filter to specific sizes. Do this first, it's very fast
     # max height 4
-    dataset = dataset.filter(lambda example: example['height'] <= max_tree_height)
+    dataset = dataset.filter(lambda example: example['height'] <= max_tree_height and example['height'] >= min_tree_height)
     # max width 80
     dataset = dataset.filter(lambda example: example['width'] <= max_tree_width)
 
-    # demo: hold out examples with a certain string (we aren't doing this yet)
-    if held:
-        dataset_held = dataset.filter(lambda example: held in example['example'])
-    if remainder:
-        dataset_remainder = dataset.filter(lambda example: remainder not in example['example'])
+    # Held out elements: Use as test set if provided
+    dataset_held = None
+    if hold_out_n_unique_examples > 0:
+        ds_uniques = set(dataset.unique('example'))
+        held_out_examples = set(list(ds_uniques)[:hold_out_n_unique_examples])
+        dataset_held = dataset.filter(lambda example: example['example'] in held_out_examples, num_proc=8)
+        dataset_remainder = dataset.filter(lambda example: example['example'] not in held_out_examples, num_proc=8)
+        dataset = dataset_remainder
+
+    # # demo: hold out examples with a certain string (we aren't doing this yet)
+    # if held:
+    #     dataset_held = dataset.filter(lambda example: held in example['example'])
+    # if remainder:
+    #     dataset_remainder = dataset.filter(lambda example: remainder not in example['example'])
+
 
     # split into train, val, test
-    train_testval = dataset.train_test_split(test_size=0.2, shuffle=False)
-    test_val = train_testval['test'].train_test_split(test_size=0.5, shuffle=False)
+
+    if dataset_held is None:
+        train_valtest = dataset.train_test_split(test_size=0.2, shuffle=False)
+        val_test = train_valtest['test'].train_test_split(test_size=0.5, shuffle=False)
+        val, test = val_test['train'], val_test['test']
+    else:
+        train_valtest = dataset.train_test_split(test_size=0.1, shuffle=False)
+        val = train_valtest['test']
+        test = dataset_held
+
     dataset = DatasetDict({
-        'train': train_testval['train'],
-        'val': test_val['test'],
-        'test': test_val['train']
+        'train': train_valtest['train'],
+        'val': val,
+        'test': test,
     })
 
     tokenizer = CharVocabulary(chars=set('0123456789+*()='))

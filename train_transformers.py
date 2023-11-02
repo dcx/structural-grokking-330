@@ -85,7 +85,10 @@ def main_lm(args):
     elif args.dataset == "tense":
         datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
-        datasets, in_vocab = build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80, lm_mode=True)
+        datasets, in_vocab = build_dataset_addmult_mod10(
+            data_file=DS_ADDMULT_DATASET, min_tree_height=args.dsam_min_tree_height, 
+            max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
+            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, lm_mode=language_model)
     else:
         datasets, in_vocab, _ = build_datasets_lm()
 
@@ -158,6 +161,11 @@ if __name__ == "__main__":
     parser.add_argument("--decoder_n_layers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--eval_every", type=int, default=1000)
+    parser.add_argument("--max_train_steps", type=int, default=20000)
+
     parser.add_argument("--relative", type=bool, default=False)
     parser.add_argument("--lm", type=bool, default=False)
     parser.add_argument("--enc", type=bool, default=False)
@@ -166,8 +174,14 @@ if __name__ == "__main__":
     parser.add_argument("--tree_transform", action="store_true")
     #### evaluating can be time consuming so we can do that later...
     parser.add_argument("--dyck_vocab", type=int, default=20)
-
     parser.add_argument("--callback", action="store_true")
+    # args for ds-addmult-mod10
+    parser.add_argument("--dsam_min_tree_height", type=int, default=1)
+    parser.add_argument("--dsam_max_tree_height", type=int, default=4)
+    parser.add_argument("--dsam_max_tree_width", type=int, default=80)
+    parser.add_argument("--dsam_hold_out_n_unique_examples", type=int, default=0, help="Hold out this many unique examples and use them as the test set.")
+
+
 
     args = parser.parse_args()
     set_seed(args)

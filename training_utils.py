@@ -33,11 +33,10 @@ def get_grad_norm(model):
     return total_norm
 
 
-def get_opt(lr, model):
+def get_opt(lr, weight_decay, model):
     if type(model) != torch.nn.Module:
         model = model.model
     no_decay = ["bias", "LayerNorm.weight"]
-    weight_decay = 0.0
     adam_epsilon = 1e-7
     optimizer_grouped_parameters = [
         {
@@ -198,12 +197,12 @@ def train_loop(
 ):
     num_steps = 0
     max_grad_norm = 1
-    train_batch_size = 8
+    train_batch_size = args.batch_size
     accum_steps = 1
-    eval_every = 2000
-    max_steps = 10000
+    eval_every = args.eval_every
+    max_steps = args.max_train_steps
 
-    opt = get_opt(args.lr, model)
+    opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
 
     if tokenizer is not None:
