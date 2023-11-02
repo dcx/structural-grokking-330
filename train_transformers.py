@@ -21,7 +21,11 @@ from data_utils.ds_addmult_mod10_helpers import eval_callback_mod10, eval_callba
 from vocabulary import CharVocabulary
 
 
-DS_ADDMULT_DATASET = "data_utils/ds_addmult_mod10/data-addmult-231019.csv"
+WANDB_USERS= {"kyle": {"project": "research-cs330", "entity": "mcgrathk"},
+              "derek": {"project": "330", "entity": "dcx"},
+              "ananjan": {"project": "structural-grokking", "entity": "tgk-ananjan"}}
+
+DS_ADDMULT_DATASET = "data_utils/ds_addmult_mod10_data/data-addmult-231019.csv"
 
 ### Change this for your own system as appropriate
 def working_dir():
@@ -174,6 +178,8 @@ if __name__ == "__main__":
     parser.add_argument("--tree_transform", action="store_true")
     #### evaluating can be time consuming so we can do that later...
     parser.add_argument("--dyck_vocab", type=int, default=20)
+    parser.add_argument("--wandb_user", type=str, default=None, required=True, choices=['ananjan', 'derek', 'kyle'])
+
     parser.add_argument("--callback", action="store_true")
     # args for ds-addmult-mod10
     parser.add_argument("--dsam_min_tree_height", type=int, default=1)
@@ -183,7 +189,11 @@ if __name__ == "__main__":
 
 
 
+    
+
     args = parser.parse_args()
+    ### NOTE: change this to your own wandb project and entity!
+    wandb.init(project=WANDB_USERS[args.wandb_user]["project"], entity=WANDB_USERS[args.wandb_user]["entity"])
     set_seed(args)
     wandb.run.name = "{}-{}".format(args.save_dir, args.seed)
     wandb.run.save()

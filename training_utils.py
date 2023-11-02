@@ -4,8 +4,6 @@ from tqdm import tqdm
 import os
 import wandb
 
-### NOTE: change this to your own wandb project and entity!
-wandb.init(project="330", entity="dcx")
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
 
