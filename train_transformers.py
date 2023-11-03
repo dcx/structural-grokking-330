@@ -14,7 +14,6 @@ from data_utils.dyck_helpers import build_datasets_dyck, eval_callback_dyck
 from data_utils.lm_dataset_helpers import eval_lm_callback
 from data_utils.tense_inflection_helpers import eval_callback_tense_inflection
 from data_utils.ds_addmult_mod10_helpers import (
-    build_dataset_addmult_mod10_lm,
     eval_callback_mod10,
     eval_callback_mod10_lm
 )
@@ -77,9 +76,6 @@ def get_base_transformer_model(args, in_vocab: CharVocabulary, out_vocab: CharVo
     )
 
     # initial_parameters = {name: param.clone() for name, param in model.named_parameters()}
-
-    model.load_state_dict(torch.load(
-        model_load_path, map_location=torch.device("cpu")))
 
     if model_load_path:
         print(f"INFO: Loading pretrained model from {model_load_path}")
@@ -159,9 +155,9 @@ def get_datasets_and_vocab(args, language_model: bool):
         return build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
         if language_model:
-            return build_dataset_addmult_mod10_lm(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
+            return build_dataset_addmult_mod10(data_file=args.dsam_data_file, max_tree_height=4, max_tree_width=80, lm_mode=True)
         else:
-            return build_dataset_addmult_mod10(data_file=DS_ADDMULT_DATASET, max_tree_height=4, max_tree_width=80)
+            return build_dataset_addmult_mod10(data_file=args.dsam_data_file, max_tree_height=4, max_tree_width=80, lm_mode=False)
     else:
         return build_datasets_lm()
 
