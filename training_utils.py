@@ -188,6 +188,8 @@ def train_loop(
     val_datasets,
     device,
     save_dir,
+    save_model: bool,
+    save_interval=1000,
     tokenizer=None,
     metric="acc",
     in_vocab=None,
@@ -202,6 +204,7 @@ def train_loop(
 
     opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
+
 
     if tokenizer is not None:
         train_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -257,6 +260,13 @@ def train_loop(
                     scheduler.step()
                     model.model.zero_grad()
                     losses = []
+
+                    # Save model if save_dir and save_interval has been hit
+                    if num_steps % save_interval == 0 and save_model:
+                            save_path = f"{os.path.join(save_dir, 'state')}_{num_steps}.pt"
+                            torch.save(model.model.state_dict(), save_path)
+                            print(f"Saved model at step {num_steps} to {save_path}")
+
                     if num_steps % eval_every == 0:
                         print("Evaluating at step {}".format(num_steps))
                         if model.model.mode == "lm":
@@ -270,11 +280,12 @@ def train_loop(
                                 num_steps,
                                 train_data_collator,
                             )
-                            print(curr_ppl)
+                            
+                            print(f"\n{curr_ppl = }")
                         if callback_fn is not None:
                             val_score = callback_fn("val")
                             test_score = callback_fn("test")
-                            print(val_score, test_score)
+                            print(f"{val_score = }", f"{test_score = }")
                             wandbdict = {
                                 "iteration": num_steps,
                                 "val_aux": val_score,
@@ -282,13 +293,9 @@ def train_loop(
                             }
                             wandb.log(wandbdict)
 
-                        # if len(save_dir) > 0:
-                        #     torch.save(
-                        #         model.model.state_dict(),
-                        #         os.path.join(
-                        #             save_dir, "checkpoint_{}.pickle".format(num_steps)
-                        #         ),
-                        #     )
+                        
+
+
                     if num_steps > max_steps:
                         break
             if losses:
@@ -309,6 +316,11 @@ def train_loop(
                 losses = []
                 if num_steps > max_steps:
                     break
+
+    if save_model:
+        save_path = f"{os.path.join(save_dir, 'state')}_final_model.pt"
+        torch.save(model.model.state_dict(), save_path)
+        print(f"Saved final model to {save_path}")
 
     print("Best Perplexities,", best_ppl)
     return
