@@ -150,16 +150,19 @@ def get_datasets_and_vocab(args, language_model: bool):
         tuple: A tuple containing the datasets and input vocabulary.
     """
     if args.dataset == "dyck":
-        return build_datasets_dyck(vocab=args.dyck_vocab)
+        datasets, in_vocab, _ =  build_datasets_dyck(vocab=args.dyck_vocab)
     elif args.dataset == "tense":
-        return build_datasets_tense_inflection()
+        datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
-        if language_model:
-            return build_dataset_addmult_mod10(data_file=args.dsam_data_file, max_tree_height=4, max_tree_width=80, lm_mode=True)
-        else:
-            return build_dataset_addmult_mod10(data_file=args.dsam_data_file, max_tree_height=4, max_tree_width=80, lm_mode=False)
+        datasets, in_vocab = build_dataset_addmult_mod10(
+            data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
+            max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
+            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_regex=args.dsam_hold_out_regex,
+            lm_mode=language_model)
     else:
-        return build_datasets_lm()
+        datasets, in_vocab = build_datasets_lm()
+
+    return datasets, in_vocab
 
 
 def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
@@ -183,7 +186,8 @@ def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
         "lm": lambda split: eval_lm_callback(model, in_vocab, split),
         "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
         "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets) if language_model else eval_callback_mod10(model, in_vocab, split, datasets)
+        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
+            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
     }
 
     return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))

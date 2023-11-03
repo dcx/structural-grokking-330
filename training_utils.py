@@ -280,11 +280,12 @@ def train_loop(
                                 num_steps,
                                 train_data_collator,
                             )
-                            print(curr_ppl)
+                            
+                            print(f"\n{curr_ppl = }")
                         if callback_fn is not None:
                             val_score = callback_fn("val")
                             test_score = callback_fn("test")
-                            print(val_score, test_score)
+                            print(f"{val_score = }", f"{test_score = }")
                             wandbdict = {
                                 "iteration": num_steps,
                                 "val_aux": val_score,
