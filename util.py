@@ -196,4 +196,3 @@ def get_masking_info(tokenizer, input_strs, fn, **kwargs):
         sentence2idx_tuple.append(relative_idxs)
 
     return sentence2idx_tuple, masked_strs, input_masks
-
