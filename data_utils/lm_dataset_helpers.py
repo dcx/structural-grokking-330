@@ -59,7 +59,7 @@ def build_datasets_lm():
     return dataset, in_vocab, in_sentences
 
 
-def eval_lm_callback(lm, in_vocab, split):
+def eval_lm_callback(lm, in_vocab, split, eval_batch_size=32):
     def tokenizer(s):
         return [lm.encoder_sos] + in_vocab(s)
 
@@ -73,7 +73,7 @@ def eval_lm_callback(lm, in_vocab, split):
         q_words.append(q_word)
         prefixes.append(" ".join(sent_words[: idx + 1]))
 
-    out = test_continuations(tokenizer, lm, prefixes, 0)
+    out = test_continuations(tokenizer, lm, prefixes, 0, batch_size=eval_batch_size)
     # out = test_continuations_gpt2(tokenizer, lm, prefixes[:100], args.gpu_id)
     closing_words = ["doesn't", "does", "do", "don't"]
     closing_word_idxs = [in_vocab[w] for w in closing_words]

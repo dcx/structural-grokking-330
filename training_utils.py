@@ -70,7 +70,7 @@ def get_scheduler(opt, t_total):
     return scheduler
 
 
-def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collator):
+def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collator, eval_batch_size=32):
     def helper(validation):
         model_interface.model.eval()
         loss_curr = 0
@@ -85,7 +85,6 @@ def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collato
                 total += 1
         return loss_curr / total
 
-    eval_batch_size = 32
     plots = {}
     curr_accs = {}
     for key, val_dataset in val_datasets.items():
@@ -177,6 +176,7 @@ def eval_callback(
         device,
         num_steps,
         train_data_collator,
+        args.batch_size_eval,
     )
     return best_accs, curr_accs
 

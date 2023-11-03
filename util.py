@@ -48,7 +48,7 @@ def run_lm_decoding(tokenizer, lm, prefixes, gpu_id):
 
 
 def test_continuations(
-    tokenizer, lm, prefixes, gpu_id, get_attn_scores=False, attn_layer=-1
+    tokenizer, lm, prefixes, gpu_id, get_attn_scores=False, attn_layer=-1, batch_size=32
 ):
     data_collator = collate.VarLengthCollate(None)
 
@@ -62,7 +62,6 @@ def test_continuations(
         in_len = inp["in_len"].long()
         return inp["in"].transpose(0, 1), in_len
 
-    batch_size = 32
     st = 0
     device = torch.device("cuda:{}".format(gpu_id))
 

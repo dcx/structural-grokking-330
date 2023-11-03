@@ -25,8 +25,6 @@ WANDB_USERS= {"kyle": {"project": "research-cs330", "entity": "mcgrathk"},
               "derek": {"project": "330", "entity": "dcx"},
               "ananjan": {"project": "structural-grokking", "entity": "tgk-ananjan"}}
 
-DS_ADDMULT_DATASET = "data_utils/ds_addmult_mod10_data/data-addmult-231019.csv"
-
 ### Change this for your own system as appropriate
 def working_dir():
     USER = os.environ["USER"]
@@ -90,9 +88,10 @@ def main_lm(args):
         datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
         datasets, in_vocab = build_dataset_addmult_mod10(
-            data_file=DS_ADDMULT_DATASET, min_tree_height=args.dsam_min_tree_height, 
+            data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
             max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
-            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, lm_mode=language_model)
+            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_regex=args.dsam_hold_out_regex,
+            lm_mode=language_model)
     else:
         datasets, in_vocab, _ = build_datasets_lm()
 
@@ -113,9 +112,9 @@ def main_lm(args):
             )
         elif args.dataset == "ds-addmult-mod10":
             if (language_model):
-                callback_fn = lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets)
+                callback_fn = lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
             else:
-                callback_fn = lambda split: eval_callback_mod10(model, in_vocab, split, datasets)
+                callback_fn = lambda split: eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
         elif args.dataset == "dyck":
             callback_fn = lambda split: eval_callback_dyck(model, in_vocab, split)
         else:
@@ -166,6 +165,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size_eval", type=int, default=8)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--eval_every", type=int, default=1000)
     parser.add_argument("--max_train_steps", type=int, default=20000)
@@ -182,10 +182,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--callback", action="store_true")
     # args for ds-addmult-mod10
+    parser.add_argument("--dsam_data_file", type=str, default="data_utils/ds_addmult_mod10_data/data-addmult-231019.csv")
     parser.add_argument("--dsam_min_tree_height", type=int, default=1)
     parser.add_argument("--dsam_max_tree_height", type=int, default=4)
     parser.add_argument("--dsam_max_tree_width", type=int, default=80)
     parser.add_argument("--dsam_hold_out_n_unique_examples", type=int, default=0, help="Hold out this many unique examples and use them as the test set.")
+    parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
 
 
 

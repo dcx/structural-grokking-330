@@ -1,5 +1,5 @@
 from typing import Tuple, Optional
-from datasets import load_dataset, DatasetDict
+from datasets import load_dataset, DatasetDict, concatenate_datasets
 from vocabulary import CharVocabulary
 import torch
 from torch.utils.data import (
@@ -7,6 +7,7 @@ from torch.utils.data import (
     RandomSampler,
     SequentialSampler,
 )
+import re
 import collate
 from tqdm import tqdm
 from util import test_continuations
@@ -18,6 +19,7 @@ def build_dataset_addmult_mod10(
     max_tree_height: int = 4, 
     max_tree_width: int = 80, 
     hold_out_n_unique_examples: int = 0,
+    hold_out_regex: Optional[str] = None,
     lm_mode: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
     """
@@ -55,7 +57,23 @@ def build_dataset_addmult_mod10(
         held_out_examples = set(list(ds_uniques)[:hold_out_n_unique_examples])
         dataset_held = dataset.filter(lambda example: example['example'] in held_out_examples, num_proc=8)
         dataset_remainder = dataset.filter(lambda example: example['example'] not in held_out_examples, num_proc=8)
+        print(f"# held out random examples: {len(dataset_held)}")
         dataset = dataset_remainder
+
+    if hold_out_regex is not None:
+        # escape here because providing escaped regex to launch.json and sweeps is messy (they have their own backslash escaping)
+        hold_out_regex = hold_out_regex.replace('(', '\(').replace(')', '\)').replace('+', '\+').replace('*', '\*')
+        dataset_held_regex = dataset.filter(lambda example: re.search(hold_out_regex, example['example']) is not None, num_proc=8)
+        dataset_remainder = dataset.filter(lambda example: re.search(hold_out_regex, example['example']) is None, num_proc=8)
+        dataset = dataset_remainder
+        print(f"# held out examples via regex: {len(dataset_held_regex)}")
+        if len(dataset_held_regex) > 0:
+            if dataset_held is None:
+                dataset_held = dataset_held_regex
+            else:
+                dataset_held = concatenate_datasets([dataset_held, dataset_held_regex])
+
+
 
     # # demo: hold out examples with a certain string (we aren't doing this yet)
     # if held:
@@ -102,7 +120,7 @@ def build_dataset_addmult_mod10(
     return dataset, tokenizer
 
 
-def eval_callback_mod10(model, in_vocab, split, datasets):
+def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32):
     """PROTOTYPE. Not finished"""
     # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
     # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
@@ -117,7 +135,6 @@ def eval_callback_mod10(model, in_vocab, split, datasets):
     model.eval()
 
     with torch.no_grad():  # Disable gradient calculations during evaluation
-        eval_batch_size = 8
         eval_dataloader = DataLoader(
             data,
             sampler=SequentialSampler(data),
@@ -146,7 +163,7 @@ def eval_callback_mod10(model, in_vocab, split, datasets):
     print(f'Accuracy on {split} data: {accuracy:.2f}')
     return accuracy
 
-def eval_callback_mod10_lm(lm, in_vocab, split, datasets):
+def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32):
     """PROTOTYPE. Not finished"""
     # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
     # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
@@ -165,7 +182,7 @@ def eval_callback_mod10_lm(lm, in_vocab, split, datasets):
         queries.append(qs + '=')
         targets.append(int(ts))
 
-    out = test_continuations(tokenizer, lm, queries, 0)
+    out = test_continuations(tokenizer, lm, queries, 0, batch_size=eval_batch_size)
     desired_out = '0123456789'
     desired_out_idx = [in_vocab(w) for w in desired_out]
     out = out[:, desired_out_idx]
