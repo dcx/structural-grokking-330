@@ -160,7 +160,8 @@ def get_datasets_and_vocab(args, language_model: bool):
         datasets, in_vocab = build_dataset_addmult_mod10(
             data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
             max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
-            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_regex=args.dsam_hold_out_regex,
+            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_percent=args.dsam_hold_out_percent,
+            hold_out_regex=args.dsam_hold_out_regex,
             lm_mode=language_model)
     else:
         datasets, in_vocab = build_datasets_lm()
@@ -307,6 +308,7 @@ if __name__ == "__main__":
     parser.add_argument("--distance_fn", type=str, default="cosine", help="Distance function used by regularization.")
     parser.add_argument("--regularize_all", type=bool, default=False, help="Regularize using all strings in training set (just keep this off).")
     parser.add_argument("--regularizer_rel_wt", type=float, default=0.1, help="Initial relative weight of regularizer wrt objective loss.")
+    parser.add_argument("--regularizer_steps", type=int, default=2, help="Regularize every regularizer_steps training steps.")
     parser.add_argument("--regularizer_delta", type=float, default=0.0, help="Increase relative weight of regularizer by this value every change_steps of training")
     parser.add_argument("--change_steps", type=int, default=500, help="Increase relative weight of regularizer after this number of regularization steps")
     parser.add_argument("--batch_size", type=int, default=16)
@@ -330,11 +332,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--callback", action="store_true")
     # args for ds-addmult-mod10
-    parser.add_argument("--dsam_data_file", type=str, default="data_utils/ds_addmult_mod10_data/data-addmult-231019.csv")
+    parser.add_argument("--dsam_data_file", type=str, default="data_utils/ds_addmult_mod10_data/data-addmult-231102-1.5m.csv")
     parser.add_argument("--dsam_min_tree_height", type=int, default=1)
     parser.add_argument("--dsam_max_tree_height", type=int, default=4)
     parser.add_argument("--dsam_max_tree_width", type=int, default=80)
     parser.add_argument("--dsam_hold_out_n_unique_examples", type=int, default=0, help="Hold out this many unique examples and use them as the test set.")
+    parser.add_argument("--dsam_hold_out_percent", type=float, default=0.0, help="Hold out this percent of unique examples and use them as the test set.")
     parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
 
 

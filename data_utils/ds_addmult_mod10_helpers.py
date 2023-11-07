@@ -19,6 +19,7 @@ def build_dataset_addmult_mod10(
     max_tree_height: int = 4, 
     max_tree_width: int = 80, 
     hold_out_n_unique_examples: int = 0,
+    hold_out_percent: float = 0.0,
     hold_out_regex: Optional[str] = None,
     lm_mode: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
@@ -55,6 +56,14 @@ def build_dataset_addmult_mod10(
     if hold_out_n_unique_examples > 0:
         ds_uniques = set(dataset.unique('example'))
         held_out_examples = set(list(ds_uniques)[:hold_out_n_unique_examples])
+        dataset_held = dataset.filter(lambda example: example['example'] in held_out_examples, num_proc=8)
+        dataset_remainder = dataset.filter(lambda example: example['example'] not in held_out_examples, num_proc=8)
+        print(f"# held out random examples: {len(dataset_held)}")
+        dataset = dataset_remainder
+
+    if hold_out_percent > 0:
+        ds_uniques = set(dataset.unique('example'))
+        held_out_examples = set(list(ds_uniques)[:int(hold_out_percent*len(ds_uniques))])
         dataset_held = dataset.filter(lambda example: example['example'] in held_out_examples, num_proc=8)
         dataset_remainder = dataset.filter(lambda example: example['example'] not in held_out_examples, num_proc=8)
         print(f"# held out random examples: {len(dataset_held)}")
