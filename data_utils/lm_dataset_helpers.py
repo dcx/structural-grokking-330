@@ -33,6 +33,26 @@ def read_lm_data(splits, do_process=True):
                 in_sentences.append(sent)
     return in_sentences, index_map
 
+def process_split(sents, split_by_words):
+    def remove_fullstop(sent_list):
+        if sent_list[-1] == ".":
+            return sent_list[:-1]
+
+    new_sents = []
+    target_words = []
+    for sent in sents:
+        split_word = None
+        sent_words = sent.split(" ")
+        for word in split_by_words:
+            if word in sent_words:
+                split_word = word
+                break
+        if split_word is None:
+            continue
+        idx = sent_words.index(split_word)
+        target_words.append(sent_words[idx + 1])
+        new_sents.append(" ".join(remove_fullstop(sent_words[:idx])))
+    return new_sents, target_words
 
 def build_datasets_lm():
     def get_subset(elem_list, idx_list):
@@ -46,19 +66,23 @@ def build_datasets_lm():
     dataset = {}
     for split in splits:
         in_subset = get_subset(in_sentences, index_map[split])
+        # print(in_subset)
         in_subset_tokenized = [in_vocab(s) for s in in_subset]
         in_lens = [len(s) for s in in_subset_tokenized]
+        req_str, _ = process_split(in_subset, split_by_words=["quest", "decl"])
+        # print(req_str)
         data = {
             "in": in_subset_tokenized,
             "in_len": in_lens,
             "idxs": index_map[split],
+            "string": req_str
         }
         dataset_curr = HFDataset.from_dict(data)
         dataset[split] = dataset_curr
     return dataset, in_vocab, in_sentences
 
 
-def eval_lm_callback(lm, in_vocab, split):
+def eval_lm_callback(lm, in_vocab, split, eval_batch_size=32):
     def tokenizer(s):
         return [lm.encoder_sos] + in_vocab(s)
 
@@ -72,7 +96,7 @@ def eval_lm_callback(lm, in_vocab, split):
         q_words.append(q_word)
         prefixes.append(" ".join(sent_words[: idx + 1]))
 
-    out = test_continuations(tokenizer, lm, prefixes, 0)
+    out = test_continuations(tokenizer, lm, prefixes, 0, batch_size=eval_batch_size)
     # out = test_continuations_gpt2(tokenizer, lm, prefixes[:100], args.gpu_id)
     closing_words = ["doesn't", "does", "do", "don't"]
     closing_word_idxs = [in_vocab[w] for w in closing_words]

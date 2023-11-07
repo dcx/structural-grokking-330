@@ -2,6 +2,7 @@ import torch
 import torch.nn
 import torch.nn.functional as F
 from layers import Transformer, TiedEmbedding
+from layers.transformer import RelativeTransformer
 from typing import Callable, Optional
 import math
 import layers
@@ -232,7 +233,7 @@ class TransformerEncDecModel(torch.nn.Module):
         state_size: int = 512,
         ff_multiplier: float = 1,
         max_len: int = 5000,
-        transformer=Transformer,
+        relative: bool = False,
         tied_embedding: bool = False,
         pos_embeddig: Optional[Callable[[torch.Tensor, int], torch.Tensor]] = None,
         encoder_sos: bool = True,
@@ -279,6 +280,11 @@ class TransformerEncDecModel(torch.nn.Module):
         )
 
         self.register_buffer("int_seq", torch.arange(max_len, dtype=torch.long))
+        self.relative = relative
+        if (relative):
+            transformer = RelativeTransformer
+        else:
+            transformer = Transformer
         self.construct(transformer, **kwargs)
         self.reset_parameters()
 
@@ -300,7 +306,11 @@ class TransformerEncDecModel(torch.nn.Module):
         if self.scale_mode == "opennmt":
             t = t * math.sqrt(t.shape[-1])
 
-        return self.pos(t, offset)
+        if (self.relative):
+            # positional encoding goes inside attention layer
+            return t
+        else:
+            return self.pos(t, offset)
 
     def construct(self, transformer, **kwargs):
         self.input_embedding = torch.nn.Embedding(

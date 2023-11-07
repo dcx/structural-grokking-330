@@ -5,3 +5,8 @@ wandb
 nohup.out
 .vscode
 231019-data
+*.txt
+.hypothesis
+checkpoints
+tree_projections/__pycache__
+runs

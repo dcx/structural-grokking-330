@@ -3,9 +3,8 @@ import sequence
 from tqdm import tqdm
 import os
 import wandb
+from time import time
 
-### NOTE: change this to your own wandb project and entity!
-wandb.init(project="research-cs330", entity="mcgrathk")
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
 
@@ -33,11 +32,10 @@ def get_grad_norm(model):
     return total_norm
 
 
-def get_opt(lr, model):
+def get_opt(lr, weight_decay, model):
     if type(model) != torch.nn.Module:
         model = model.model
     no_decay = ["bias", "LayerNorm.weight"]
-    weight_decay = 0.0
     adam_epsilon = 1e-7
     optimizer_grouped_parameters = [
         {
@@ -66,14 +64,14 @@ def get_opt(lr, model):
 
 
 def get_scheduler(opt, t_total):
-    num_warmup_steps = 10000
+    num_warmup_steps = 100
     scheduler = get_linear_schedule_with_warmup(
         opt, num_warmup_steps=num_warmup_steps, num_training_steps=t_total
     )
     return scheduler
 
 
-def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collator):
+def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collator, eval_batch_size=32):
     def helper(validation):
         model_interface.model.eval()
         loss_curr = 0
@@ -82,13 +80,15 @@ def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collato
             for batch in tqdm(validation):
                 batch_gpu = {}
                 for key in batch:
-                    batch_gpu[key] = batch[key].to(device)
+                    if (key == 'string'):
+                        batch_gpu[key] = batch[key]
+                    else:
+                        batch_gpu[key] = batch[key].to(device)
                 res = model_interface(batch_gpu, normalize=True)
                 loss_curr += res.loss.cpu().numpy()
                 total += 1
         return loss_curr / total
 
-    eval_batch_size = 32
     plots = {}
     curr_accs = {}
     for key, val_dataset in val_datasets.items():
@@ -180,6 +180,7 @@ def eval_callback(
         device,
         num_steps,
         train_data_collator,
+        args.batch_size_eval,
     )
     return best_accs, curr_accs
 
@@ -191,20 +192,29 @@ def train_loop(
     val_datasets,
     device,
     save_dir,
+    save_model: bool,
+    save_interval=1000,
     tokenizer=None,
     metric="acc",
     in_vocab=None,
     callback_fn=None,
+    regularizer=None
 ):
     num_steps = 0
     max_grad_norm = 1
-    train_batch_size = 8
+    train_batch_size = args.batch_size
     accum_steps = 1
-    eval_every = 10000
-    max_steps = 2000000
+    eval_every = args.eval_every
+    max_steps = args.max_train_steps
+    regularizer_steps = args.regularizer_steps
+    change_steps = args.change_steps
+    regularizer_delta = args.regularizer_delta
+    regularizer_rel_wt = args.regularizer_rel_wt
+    regularize_all = args.regularize_all
 
-    opt = get_opt(args.lr, model)
+    opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
+
 
     if tokenizer is not None:
         train_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -214,6 +224,7 @@ def train_loop(
     best_ppl = {key: 10000.0 for key in val_datasets}
 
     while True:
+        # print(train_dataset)
         train_dataloader = DataLoader(
             train_dataset,
             sampler=RandomSampler(train_dataset),
@@ -225,6 +236,9 @@ def train_loop(
             break
         with torch.enable_grad(), tqdm(total=total_train_sz) as progress_bar:
             losses = []
+            accum_strings = []
+            sci_loss = None
+            regularizer_steps_decay = 0
             for curr_batch_dict in train_dataloader:
                 if type(model) != torch.nn.Module:
                     model.model.train()
@@ -232,9 +246,37 @@ def train_loop(
                     model.train()
                 curr_batch_dict_gpu = {}
                 for key in curr_batch_dict:
-                    curr_batch_dict_gpu[key] = curr_batch_dict[key].to(device)
+                    if (key == 'string'):
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key]
+                    else:
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key].to(device)
                 loss_curr = model(curr_batch_dict_gpu).loss
                 progress_bar.update(curr_batch_dict["in"].shape[1])
+                if (regularizer is not None):
+                    accum_strings += curr_batch_dict['string']
+
+                # Tree regularizer!
+                if num_steps % regularizer_steps == 0:
+                    if (regularizer is not None):
+                        if (regularize_all):
+                            sci_charts = regularizer.build_scores_batch(accum_strings, model, 1, tqdm_disable=True, parse_splits=None)
+                        else:
+                            sci_charts = regularizer.build_scores_batch(curr_batch_dict['string'], model, 1, tqdm_disable=True, parse_splits=None)
+                        if (args.mean_regularize):
+                            sci_scores = regularizer.get_score_mean(sci_charts)
+                        else:
+                            sci_scores = regularizer.get_score(sci_charts)
+                        # print(sci_scores)
+                        fin_sci_score = torch.mean(torch.stack(sci_scores))
+                        sci_loss = -regularizer_rel_wt * fin_sci_score
+                        sci_loss.backward()
+                        accum_strings = []
+                        regularizer_steps_decay += 1
+                        if (regularizer_steps_decay % change_steps == 0):
+                            regularizer_rel_wt += regularizer_delta
+                            regularizer_rel_wt = min(0.1, regularizer_rel_wt)
+
+                
                 losses.append(loss_curr.item())
 
                 loss_curr /= accum_steps
@@ -248,34 +290,53 @@ def train_loop(
                         {"loss": sum(losses), "num_steps": num_steps}
                     )
                     grad_norm = get_grad_norm(model.model)
-                    wandb.log(
-                        {
-                            "loss": sum(losses),
-                            "grad_norm": grad_norm,
-                            "iteration": num_steps,
-                        }
-                    )
+                    if (regularizer is not None):
+                        wandb.log(
+                            {
+                                "loss": sum(losses),
+                                "grad_norm": grad_norm,
+                                "iteration": num_steps,
+                                "sci_score": fin_sci_score
+                            }
+                        )
+                    else:
+                        wandb.log(
+                            {
+                                "loss": sum(losses),
+                                "grad_norm": grad_norm,
+                                "iteration": num_steps
+                            }
+                        )
                     opt.step()
                     scheduler.step()
                     model.model.zero_grad()
                     losses = []
+
+                    # Save model if save_dir and save_interval has been hit
+                    if num_steps % save_interval == 0 and save_model:
+                            save_path = f"{os.path.join(save_dir, 'state')}_{num_steps}.pt"
+                            torch.save(model.model.state_dict(), save_path)
+                            print(f"Saved model at step {num_steps} to {save_path}")
+
                     if num_steps % eval_every == 0:
                         print("Evaluating at step {}".format(num_steps))
-                        best_ppl, curr_ppl = eval_callback(
-                            args,
-                            model,
-                            val_datasets,
-                            tokenizer,
-                            best_ppl,
-                            device,
-                            num_steps,
-                            train_data_collator,
-                        )
-                        print(curr_ppl)
+                        if model.model.mode == "lm":
+                            best_ppl, curr_ppl = eval_callback(
+                                args,
+                                model,
+                                val_datasets,
+                                tokenizer,
+                                best_ppl,
+                                device,
+                                num_steps,
+                                train_data_collator,
+                            )
+                            
+                            print(f"\n{curr_ppl = }")
                         if callback_fn is not None:
                             val_score = callback_fn("val")
                             test_score = callback_fn("test")
-                            print(val_score, test_score)
+                            print(f"{val_score = }", f"{test_score = }")
                             wandbdict = {
                                 "iteration": num_steps,
                                 "val_aux": val_score,
@@ -283,13 +344,7 @@ def train_loop(
                             }
                             wandb.log(wandbdict)
 
-                        if len(save_dir) > 0:
-                            torch.save(
-                                model.model.state_dict(),
-                                os.path.join(
-                                    save_dir, "checkpoint_{}.pickle".format(num_steps)
-                                ),
-                            )
+
                     if num_steps > max_steps:
                         break
             if losses:
@@ -310,6 +365,11 @@ def train_loop(
                 losses = []
                 if num_steps > max_steps:
                     break
+
+    if save_model:
+        save_path = f"{os.path.join(save_dir, 'state')}_final_model.pt"
+        torch.save(model.model.state_dict(), save_path)
+        print(f"Saved final model to {save_path}")
 
     print("Best Perplexities,", best_ppl)
     return
