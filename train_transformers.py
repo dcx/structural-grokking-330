@@ -317,9 +317,6 @@ if __name__ == "__main__":
     parser.add_argument("--eval_every", type=int, default=1000)
     parser.add_argument("--max_train_steps", type=int, default=20000)
 
-    parser.add_argument("--relative", type=bool, default=False)
-    parser.add_argument("--lm", type=bool, default=False)
-    parser.add_argument("--enc", type=bool, default=False)
     parser.add_argument("--save_model", action="store_true", default=False)
     parser.add_argument("--save_interval", type=int, default=10000)
     # this is only used if args.dataset == pcfg
