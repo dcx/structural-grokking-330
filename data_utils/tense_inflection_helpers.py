@@ -2,7 +2,7 @@
 
 from vocabulary import WordVocabulary
 from datasets import Dataset as HFDataset
-from util import run_lm_decoding
+from util import run_lm_decoding, process_split
 import random
 import os
 
@@ -141,27 +141,6 @@ def read_ti_data(splits, do_process=True):
                 index_map[split].append(len(in_sentences))
                 in_sentences.append(sent)
     return in_sentences, index_map
-
-def process_split(sents, split_by_words):
-    def remove_fullstop(sent_list):
-        if sent_list[-1] == ".":
-            return sent_list[:-1]
-
-    new_sents = []
-    target_words = []
-    for sent in sents:
-        split_word = None
-        sent_words = sent.split(" ")
-        for word in split_by_words:
-            if word in sent_words:
-                split_word = word
-                break
-        if split_word is None:
-            continue
-        idx = sent_words.index(split_word)
-        target_words.append(sent_words[idx + 1])
-        new_sents.append(" ".join(remove_fullstop(sent_words[:idx])))
-    return new_sents, target_words
 
 def build_datasets_tense_inflection():
     def get_subset(elem_list, idx_list):

@@ -5,13 +5,12 @@ from tqdm import tqdm
 import random
 from datasets import Dataset as HFDataset
 from vocabulary import WordVocabulary
-from util import test_continuations
+from util import test_continuations, process_split
 
 DATA_DIR = os.getcwd()
 
 def process(line):
     return line.replace("\t", " ")
-
 
 #### define a callback function for how to handle model predictions?
 
@@ -32,27 +31,6 @@ def read_lm_data(splits, do_process=True):
                 index_map[split].append(len(in_sentences))
                 in_sentences.append(sent)
     return in_sentences, index_map
-
-def process_split(sents, split_by_words):
-    def remove_fullstop(sent_list):
-        if sent_list[-1] == ".":
-            return sent_list[:-1]
-
-    new_sents = []
-    target_words = []
-    for sent in sents:
-        split_word = None
-        sent_words = sent.split(" ")
-        for word in split_by_words:
-            if word in sent_words:
-                split_word = word
-                break
-        if split_word is None:
-            continue
-        idx = sent_words.index(split_word)
-        target_words.append(sent_words[idx + 1])
-        new_sents.append(" ".join(remove_fullstop(sent_words[:idx])))
-    return new_sents, target_words
 
 def build_datasets_lm():
     def get_subset(elem_list, idx_list):

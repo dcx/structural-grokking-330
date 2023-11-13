@@ -1,15 +1,23 @@
+# PROTOTYPE FILE
+
 from datasets import load_dataset
 
+TRAIN_FILE = "../data_utils/ds_addmult_mod10/data-addmult-231019.csv"
+ERROR_FILE = "/sailhome/ananjan/grokking-330/structural-grokking-330/errors/dsmult_lm_e4_d4.txt"
+
 def get_struct(ex):
+    # Gets a representation for the structure corresponding to any example
     out_ex = ""
-    for _ in ex:
-        if (_ in "()*+"):
-            out_ex += _
+    for character in ex:
+        if (character in "()*+"):
+            out_ex += character
         else:
             out_ex += "a"
     return out_ex
 
 def load_train(file_path):
+    # Quick and dirty fix, not changing right now
+    # Load training data for AddMult dataset
     # Fix loader code
     dataset = load_dataset("csv", data_files=file_path, split="all")
     # max height 4
@@ -25,6 +33,8 @@ def load_train(file_path):
     return train_strings
 
 def load_errors(file):
+    # Load file of errors dumped during testing
+    # Can be dumped by using --dump_errs --dump_file PATH/TO/FILE while running train_transformers.py in eval mode
     error_strings = []
     with open(file, 'r') as f:
         for line in f:
@@ -32,8 +42,11 @@ def load_errors(file):
     return error_strings
 
 if __name__ == '__main__':
-    train_strings = load_train("../data_utils/ds_addmult_mod10/data-addmult-231019.csv")
-    error_strings = load_errors('/sailhome/ananjan/grokking-330/structural-grokking-330/errors/dsmult_lm_e4_d4.txt')
+    # Compares the distribution of structures in the training files and error examples
+    # load_errors docstring contains details about creating error file
+
+    train_strings = load_train(TRAIN_FILE)
+    error_strings = load_errors(ERROR_FILE)
 
     train_structs = {}
     for _ in train_strings:
@@ -65,8 +78,11 @@ if __name__ == '__main__':
         if (_ not in train_strings):
             not_in_train_tot += 1
 
+    # Just a bunch of statistics for quick validation, can ignore
+    # Number of structures in error examples not present in train set
     print(not_in_train/len(error_strings))
+    # Number of error examples not present in train set
     print(not_in_train_tot/len(error_strings))
+    # Average number of examples per structure in train set
     print(len(train_strings)/len(train_structs))
-    print(error_struct_num/len(error_structs))
 

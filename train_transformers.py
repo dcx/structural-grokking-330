@@ -164,7 +164,7 @@ def get_datasets_and_vocab(args, language_model: bool):
             hold_out_regex=args.dsam_hold_out_regex,
             lm_mode=language_model)
     else:
-        datasets, in_vocab = build_datasets_lm()
+        datasets, in_vocab, _ = build_datasets_lm()
 
     return datasets, in_vocab
 

@@ -259,13 +259,13 @@ def train_loop(
                 if num_steps % regularizer_steps == 0:
                     if (regularizer is not None):
                         if (regularize_all):
-                            sci_charts = regularizer.build_scores_batch(accum_strings, model, 1, tqdm_disable=True, parse_splits=None)
+                            sci_charts = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True)
                         else:
-                            sci_charts = regularizer.build_scores_batch(curr_batch_dict['string'], model, 1, tqdm_disable=True, parse_splits=None)
+                            sci_charts = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True)
                         if (args.mean_regularize):
-                            sci_scores = regularizer.get_score_mean(sci_charts)
+                            sci_scores = regularizer.get_score(sci_charts, mean=True)
                         else:
-                            sci_scores = regularizer.get_score(sci_charts)
+                            sci_scores = regularizer.get_score(sci_charts, mean=False)
                         # print(sci_scores)
                         fin_sci_score = torch.mean(torch.stack(sci_scores))
                         sci_loss = -regularizer_rel_wt * fin_sci_score
@@ -313,10 +313,15 @@ def train_loop(
                     losses = []
 
                     # Save model if save_dir and save_interval has been hit
-                    if num_steps % save_interval == 0 and save_model:
-                            save_path = f"{os.path.join(save_dir, 'state')}_{num_steps}.pt"
+                    if (save_model and save_interval == 0):
+                        if num_steps % 100000 == 0:
+                            save_path = f"{os.path.join(save_dir, 'state')}.pt"
                             torch.save(model.model.state_dict(), save_path)
                             print(f"Saved model at step {num_steps} to {save_path}")
+                    elif num_steps % save_interval == 0 and save_model:
+                        save_path = f"{os.path.join(save_dir, 'state')}_{num_steps}.pt"
+                        torch.save(model.model.state_dict(), save_path)
+                        print(f"Saved model at step {num_steps} to {save_path}")
 
                     if num_steps % eval_every == 0:
                         print("Evaluating at step {}".format(num_steps))
