@@ -19,7 +19,6 @@ def build_dataset_addmult_mod10(
     max_tree_height: int = 4, 
     max_tree_width: int = 80, 
     hold_out_n_unique_examples: int = 0,
-    hold_out_percent: float = 0.0,
     hold_out_regex: Optional[str] = None,
     lm_mode: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
@@ -56,14 +55,6 @@ def build_dataset_addmult_mod10(
     if hold_out_n_unique_examples > 0:
         ds_uniques = set(dataset.unique('example'))
         held_out_examples = set(list(ds_uniques)[:hold_out_n_unique_examples])
-        dataset_held = dataset.filter(lambda example: example['example'] in held_out_examples, num_proc=8)
-        dataset_remainder = dataset.filter(lambda example: example['example'] not in held_out_examples, num_proc=8)
-        print(f"# held out random examples: {len(dataset_held)}")
-        dataset = dataset_remainder
-
-    if hold_out_percent > 0:
-        ds_uniques = set(dataset.unique('example'))
-        held_out_examples = set(list(ds_uniques)[:int(hold_out_percent*len(ds_uniques))])
         dataset_held = dataset.filter(lambda example: example['example'] in held_out_examples, num_proc=8)
         dataset_remainder = dataset.filter(lambda example: example['example'] not in held_out_examples, num_proc=8)
         print(f"# held out random examples: {len(dataset_held)}")
@@ -108,8 +99,6 @@ def build_dataset_addmult_mod10(
         'test': test,
     })
 
-    # optionally: add arg above to remove the unnecessary columns:
-    # remove_columns=['height', 'width', 'example', 'answer', 'ans_mod10'])
     tokenizer = CharVocabulary(chars=set('0123456789+*()='))
     remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10']
     if lm_mode:
@@ -148,6 +137,7 @@ def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, du
 
     if (dump):
         dump_file = open(dump_file_path, 'w')
+
 
     with torch.no_grad():  # Disable gradient calculations during evaluation
         eval_dataloader = DataLoader(
@@ -204,7 +194,7 @@ def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32, du
         [qs, ts] = stringified.split('=')
         queries.append(qs + '=')
         targets.append(int(ts))
-    
+
     if (dump):
         dump_file = open(dump_file_path, 'w')
 

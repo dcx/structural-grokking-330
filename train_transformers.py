@@ -127,6 +127,14 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
+    Args:
+        args: Command line arguments.
+    """
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
 
 def init_wandb(args):
     """
@@ -160,11 +168,54 @@ def get_datasets_and_vocab(args, language_model: bool):
         datasets, in_vocab = build_dataset_addmult_mod10(
             data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
             max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
-            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_percent=args.dsam_hold_out_percent,
+            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples,
             hold_out_regex=args.dsam_hold_out_regex,
             lm_mode=language_model)
     else:
-        datasets, in_vocab, _ = build_datasets_lm()
+        datasets, in_vocab = build_datasets_lm()
+
+    return datasets, in_vocab
+
+
+def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
+    """
+    Returns the appropriate callback function based on the dataset type specified in args.
+
+    Args:
+        args: Command line arguments.
+        language_model (bool): Flag to determine if it's a language model.
+        model: The trained model.
+        in_vocab (CharVocabulary): Input vocabulary.
+        datasets: The datasets used for training and evaluation.
+
+    Returns:
+        function: The corresponding callback function.
+    """
+    if not args.callback:
+        return None
+
+    dataset_callbacks = {
+        "lm": lambda split: eval_lm_callback(model, in_vocab, split),
+        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
+        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
+        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
+            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
+    }
+
+    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
+
+
+def main_lm(args):
+    """
+    Main function for language modeling tasks.
+
+    Args:
+        args: Command line arguments.
+    """
+    language_model = args.lm
+    out_vocab = CharVocabulary(chars=set('0123456789'))
+
+    datasets, in_vocab = get_datasets_and_vocab(args, language_model)
 
     return datasets, in_vocab
 
@@ -311,6 +362,7 @@ if __name__ == "__main__":
     parser.add_argument("--regularizer_steps", type=int, default=2, help="Regularize every regularizer_steps training steps.")
     parser.add_argument("--regularizer_delta", type=float, default=0.0, help="Increase relative weight of regularizer by this value every change_steps of training")
     parser.add_argument("--change_steps", type=int, default=500, help="Increase relative weight of regularizer after this number of regularization steps")
+
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--batch_size_eval", type=int, default=8)
     parser.add_argument("--weight_decay", type=float, default=0.0)
@@ -334,7 +386,6 @@ if __name__ == "__main__":
     parser.add_argument("--dsam_max_tree_height", type=int, default=4)
     parser.add_argument("--dsam_max_tree_width", type=int, default=80)
     parser.add_argument("--dsam_hold_out_n_unique_examples", type=int, default=0, help="Hold out this many unique examples and use them as the test set.")
-    parser.add_argument("--dsam_hold_out_percent", type=float, default=0.0, help="Hold out this percent of unique examples and use them as the test set.")
     parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
 
 
