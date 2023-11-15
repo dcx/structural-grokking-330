@@ -108,7 +108,7 @@ def get_base_transformer_lm(args, in_vocab: CharVocabulary, model_load_path: str
         print(f"INFO: Loading pretrained model from {model_load_path}")
         model.load_state_dict(torch.load(
             model_load_path, map_location=torch.device("cpu")))
-    interface = create_model_interface(model, is_lm=True)
+    interface = create_model_interface(model, is_lm=True, has_token_labels=args.lm_with_token_labels)
     return model, interface
 
 
@@ -160,6 +160,7 @@ def get_datasets_and_vocab(args, language_model: bool):
             hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_regex=args.dsam_hold_out_regex,
             hold_out_p_subtrees=args.dsam_hold_out_p_subtrees,
             max_held_examples=args.dsam_max_held_examples,
+            use_intermediates=args.lm_with_token_labels,
             lm_mode=language_model)
     else:
         datasets, in_vocab = build_datasets_lm()
@@ -189,7 +190,8 @@ def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
         "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
         "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
         "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
+            if language_model and not args.lm_with_token_labels else \
+                eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval, has_token_labels=args.lm_with_token_labels)
     }
 
     return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
@@ -258,6 +260,9 @@ def validate_args(args):
         print(
             f"INFO: Saving model checkpoints in folder: '{os.path.abspath(os.path.join(os.getcwd(), args.save_dir))}'")
 
+    assert (args.lm_with_token_labels == False or args.lm == True), "If using --lm_with_token_labels, must also enable --lm"
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -282,6 +287,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--relative", type=bool, default=False)
     parser.add_argument("--lm", type=bool, default=False)
+    parser.add_argument("--lm_with_token_labels", type=bool, default=False, help="If enabled, LM backprops from per-token labels provided by dataset, instead of the shifted sequence")
     parser.add_argument("--enc", type=bool, default=False)
     parser.add_argument("--save_model", action="store_true", default=False)
     parser.add_argument("--save_interval", type=int, default=10000)
@@ -303,8 +309,6 @@ if __name__ == "__main__":
     parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
     parser.add_argument("--dsam_hold_out_p_subtrees", type=float, default=0.0, help="Hold out examples which match this proportion of unique subtrees and use them as the test set.")
     parser.add_argument("--dsam_max_held_examples", type=int, default=None, help="If specified, randomly cut held out set down to this many examples. Useful when holding out subtrees with a lot of data.")
-
-
 
     args = parser.parse_args()
 

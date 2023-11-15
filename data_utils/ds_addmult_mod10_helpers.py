@@ -23,6 +23,7 @@ def build_dataset_addmult_mod10(
     hold_out_p_subtrees: float = 0.0,
     max_held_examples: int = None,
     lm_mode: bool = False,
+    use_intermediates: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
     """
     Build an addmult mod10 dataset with specific constraints and tokenize the examples.
@@ -40,10 +41,15 @@ def build_dataset_addmult_mod10(
     hold_out_regex (Optional[str]): Take examples that match this regex and use them as the test set.
     hold_out_p_subtrees (int): Sample this percent of all unique subtrees, and use all items that match them as the test set.
     max_held_examples (int): If provided, sample this many examples from the held out set.
+    use_intermediates (bool): If True, use intermediate labels instead of just final label.
 
     Returns:
     Tuple[DatasetDict, CharVocabulary]: A tuple containing the processed huggingface dataset and the tokenizer used.
     """
+
+    # Sanity checks
+    if use_intermediates:
+        assert(lm_mode)
 
     # Load dataset
     dataset = load_dataset("csv", data_files=data_file, split="all")
@@ -114,13 +120,22 @@ def build_dataset_addmult_mod10(
         'test': test,
     })
 
-    tokenizer = CharVocabulary(chars=set('0123456789+*()='))
-    remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10', 'tree_sig']
-    if lm_mode:
+    tokenizer = CharVocabulary(chars=set('0123456789+*()=_'), ignore_char='_', ignore_char_idx=0)
+    remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10', 'ans_sublabels', 'tree_sig']
+    if lm_mode and not use_intermediates:
         dataset = dataset.map(lambda example, idx: {  
             'in': tokenizer(example['example'] + '=' + str(example['ans_mod10'])),
             'in_len': len(tokenizer(example['example'] + '=' + str(example['ans_mod10']))),
             'idxs': idx,
+        }, with_indices=True,
+        remove_columns=remove_columns)
+    elif lm_mode and use_intermediates:
+        dataset = dataset.map(lambda example, idx: {  
+            'in': tokenizer(example['example']),
+            'in_len': len(tokenizer(example['example'])),
+            'idxs': idx,
+            'labels': tokenizer(str(example['ans_sublabels'])),
+            'labels_len': len(str(example['ans_sublabels'])) - str(example['ans_sublabels']).count('_'), # number of close brackets
         }, with_indices=True,
         remove_columns=remove_columns)
     else:
@@ -135,10 +150,11 @@ def build_dataset_addmult_mod10(
     return dataset, tokenizer
 
 
-def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32):
+def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, has_token_labels=False):
     """PROTOTYPE. Not finished"""
     # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
     # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
+    # If has_token_labels is True, dataset includes labels for each token, not just one final label.
     data = datasets[split]
 
     # Initialize counters
@@ -165,12 +181,27 @@ def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32):
             label = batch['labels'].long().to(device)
 
             # Get the model's predictions
-            outputs = model(input, input_len, None, None, None)
-            _, predicted_class = torch.max(outputs, dim=1)
+            if has_token_labels: # TransformerLM
+                prefix_sos = (torch.ones((input.shape[0],1)).long() * model.encoder_sos).to(device)
+                input = torch.cat((prefix_sos, input), dim=1) # add SOS token
+                input_len += 1
 
-            # Update accuracy counters
-            total_count += label.size(0)
-            correct_count += (predicted_class == label).sum().item()
+                outputs = model(input, input_len)
+                _, preds = torch.max(outputs['data'], dim=2)
+
+                labels_cmp = torch.cat((label.T, prefix_sos), dim=1)
+                labels_match = (preds == labels_cmp) * (input != 0) * (labels_cmp != 0)
+
+                # Update accuracy counters
+                total_count += batch['labels_len'].sum().item()
+                correct_count += labels_match.sum().item()
+
+            else: # EncDec
+                outputs = model(input, input_len, None, None, None)
+                _, predicted_class = torch.max(outputs, dim=1)
+                # Update accuracy counters
+                total_count += label.size(0)
+                correct_count += (predicted_class == label).sum().item()
 
 
     # Calculate accuracy
