@@ -3,6 +3,7 @@ import sequence
 from tqdm import tqdm
 import os
 import wandb
+from time import time
 
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
@@ -63,7 +64,7 @@ def get_opt(lr, weight_decay, model):
 
 
 def get_scheduler(opt, t_total):
-    num_warmup_steps = 10000
+    num_warmup_steps = 100
     scheduler = get_linear_schedule_with_warmup(
         opt, num_warmup_steps=num_warmup_steps, num_training_steps=t_total
     )
@@ -79,7 +80,10 @@ def eval_lm(model_interface, val_datasets, best_accs, device, num_steps, collato
             for batch in tqdm(validation):
                 batch_gpu = {}
                 for key in batch:
-                    batch_gpu[key] = batch[key].to(device)
+                    if (key == 'string'):
+                        batch_gpu[key] = batch[key]
+                    else:
+                        batch_gpu[key] = batch[key].to(device)
                 res = model_interface(batch_gpu, normalize=True)
                 loss_curr += res.loss.cpu().numpy()
                 total += 1
@@ -194,6 +198,7 @@ def train_loop(
     metric="acc",
     in_vocab=None,
     callback_fn=None,
+    regularizer=None
 ):
     num_steps = 0
     max_grad_norm = 1
@@ -201,6 +206,11 @@ def train_loop(
     accum_steps = 1
     eval_every = args.eval_every
     max_steps = args.max_train_steps
+    regularizer_steps = args.regularizer_steps
+    change_steps = args.change_steps
+    regularizer_delta = args.regularizer_delta
+    regularizer_rel_wt = args.regularizer_rel_wt
+    regularize_all = args.regularize_all
 
     opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
@@ -226,6 +236,9 @@ def train_loop(
             break
         with torch.enable_grad(), tqdm(total=total_train_sz) as progress_bar:
             losses = []
+            accum_strings = []
+            sci_loss = None
+            regularizer_steps_decay = 0
             for curr_batch_dict in train_dataloader:
                 if type(model) != torch.nn.Module:
                     model.model.train()
@@ -233,9 +246,37 @@ def train_loop(
                     model.train()
                 curr_batch_dict_gpu = {}
                 for key in curr_batch_dict:
-                    curr_batch_dict_gpu[key] = curr_batch_dict[key].to(device)
+                    if (key == 'string'):
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key]
+                    else:
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key].to(device)
                 loss_curr = model(curr_batch_dict_gpu).loss
                 progress_bar.update(curr_batch_dict["in"].shape[1])
+                if (regularizer is not None):
+                    accum_strings += curr_batch_dict['string']
+
+                # Tree regularizer!
+                if num_steps % regularizer_steps == 0:
+                    if (regularizer is not None):
+                        if (regularize_all):
+                            sci_charts = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                        else:
+                            sci_charts = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                        if (args.mean_regularize):
+                            sci_scores = regularizer.get_score(sci_charts, mean=True)
+                        else:
+                            sci_scores = regularizer.get_score(sci_charts, mean=False)
+                        # print(sci_scores)
+                        fin_sci_score = torch.mean(torch.stack(sci_scores))
+                        sci_loss = -regularizer_rel_wt * fin_sci_score
+                        sci_loss.backward()
+                        accum_strings = []
+                        regularizer_steps_decay += 1
+                        if (regularizer_steps_decay % change_steps == 0):
+                            regularizer_rel_wt += regularizer_delta
+                            regularizer_rel_wt = min(0.1, regularizer_rel_wt)
+
+                
                 losses.append(loss_curr.item())
 
                 loss_curr /= accum_steps
@@ -249,23 +290,39 @@ def train_loop(
                         {"loss": sum(losses), "num_steps": num_steps}
                     )
                     grad_norm = get_grad_norm(model.model)
-                    wandb.log(
-                        {
-                            "loss": sum(losses),
-                            "grad_norm": grad_norm,
-                            "iteration": num_steps,
-                        }
-                    )
+                    if (regularizer is not None):
+                        wandb.log(
+                            {
+                                "loss": sum(losses),
+                                "grad_norm": grad_norm,
+                                "iteration": num_steps,
+                                "sci_score": fin_sci_score
+                            }
+                        )
+                    else:
+                        wandb.log(
+                            {
+                                "loss": sum(losses),
+                                "grad_norm": grad_norm,
+                                "iteration": num_steps
+                            }
+                        )
                     opt.step()
                     scheduler.step()
                     model.model.zero_grad()
                     losses = []
 
                     # Save model if save_dir and save_interval has been hit
-                    if num_steps % save_interval == 0 and save_model:
-                            save_path = f"{os.path.join(save_dir, 'state')}_{num_steps}.pt"
+                    if (save_model and save_interval == 0):
+                        # Always save to same directory
+                        if num_steps % 100000 == 0:
+                            save_path = f"{os.path.join(save_dir, 'state')}.pt"
                             torch.save(model.model.state_dict(), save_path)
                             print(f"Saved model at step {num_steps} to {save_path}")
+                    elif num_steps % save_interval == 0 and save_model:
+                        save_path = f"{os.path.join(save_dir, 'state')}_{num_steps}.pt"
+                        torch.save(model.model.state_dict(), save_path)
+                        print(f"Saved model at step {num_steps} to {save_path}")
 
                     if num_steps % eval_every == 0:
                         print("Evaluating at step {}".format(num_steps))
@@ -292,9 +349,6 @@ def train_loop(
                                 "test_aux": test_score,
                             }
                             wandb.log(wandbdict)
-
-                        
-
 
                     if num_steps > max_steps:
                         break
