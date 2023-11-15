@@ -102,6 +102,7 @@ def build_dataset_addmult_mod10(
                 dataset_held = concatenate_datasets([dataset_held, dataset_held_subtrees])
 
     if dataset_held is not None and max_held_examples is not None:
+        max_held_examples = min(max_held_examples, len(dataset_held)) # exception if max_held_examples > len(dataset_held)
         dataset_held = dataset_held.train_test_split(train_size=max_held_examples, shuffle=True)['train']
         print(f"Cutting down held out set tp max_held_examples: {len(dataset_held)}")
 
