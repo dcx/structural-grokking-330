@@ -53,5 +53,7 @@ class VarLengthCollate:
             return self([torch.tensor(b) for b in batch])
         elif isinstance(batch[0], (int, float)):
             return torch.Tensor(batch)
+        elif isinstance(batch[0], str):
+            return batch
         else:
             assert False, "Unknown type: %s" % type(batch[0])

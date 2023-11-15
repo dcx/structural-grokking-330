@@ -2,6 +2,8 @@ import os
 import random
 import numpy as np
 import torch
+import torch.nn.functional as F
+
 import argparse
 import wandb
 from vocabulary import CharVocabulary
@@ -19,6 +21,7 @@ from data_utils.ds_addmult_mod10_helpers import (
 )
 from transformer_helpers import create_model, create_lm, create_model_interface
 from training_utils import train_loop
+from regularizer_new import Chart
 
 WANDB_USERS = {
     "kyle": {"project": "research-cs330", "entity": "mcgrathk"},
@@ -124,7 +127,6 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
-
 def init_wandb(args):
     """
     Initializes the wandb environment.
@@ -157,7 +159,8 @@ def get_datasets_and_vocab(args, language_model: bool):
         datasets, in_vocab = build_dataset_addmult_mod10(
             data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
             max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
-            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, hold_out_regex=args.dsam_hold_out_regex,
+            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, 
+            hold_out_regex=args.dsam_hold_out_regex,
             hold_out_p_subtrees=args.dsam_hold_out_p_subtrees,
             max_held_examples=args.dsam_max_held_examples,
             use_intermediates=args.lm_with_token_labels,
@@ -209,6 +212,69 @@ def main_lm(args):
 
     datasets, in_vocab = get_datasets_and_vocab(args, language_model)
 
+    return datasets, in_vocab
+
+
+def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
+    """
+    Returns the appropriate callback function based on the dataset type specified in args.
+
+    Args:
+        args: Command line arguments.
+        language_model (bool): Flag to determine if it's a language model.
+        model: The trained model.
+        in_vocab (CharVocabulary): Input vocabulary.
+        datasets: The datasets used for training and evaluation.
+
+    Returns:
+        function: The corresponding callback function.
+    """
+    if not args.callback:
+        return None
+
+    dataset_callbacks = {
+        "lm": lambda split: eval_lm_callback(model, in_vocab, split),
+        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
+        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
+        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
+            if language_model and not args.lm_with_token_labels else \
+                eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval, has_token_labels=args.lm_with_token_labels)
+    }
+
+    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
+
+def get_regularizer(args, in_vocab):
+    """
+    Get tree projection regularizer if required.
+
+    Args:
+        args: Command line arguments.
+    """
+    if (args.distance_fn == "cosine"):
+        dist_fn = lambda x1, x2: F.cosine_similarity(x1, x2, dim=-1)
+    else:
+        dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
+    if (args.regularize):
+        if args.dataset == "ds-addmult-mod10":
+            regularizer = Chart(dist_fn, in_vocab, spaces=False)
+        else:
+            regularizer = Chart(dist_fn, in_vocab, spaces=True)
+    else:
+        regularizer = None
+    return regularizer
+
+def main_lm(args):
+    """
+    Main function for language modeling tasks.
+
+    Args:
+        args: Command line arguments.
+    """
+    language_model = args.lm
+    out_vocab = CharVocabulary(chars=set('0123456789'))
+
+    datasets, in_vocab = get_datasets_and_vocab(args, language_model)
+
     if language_model:
         model, interface = get_base_transformer_lm(
             args, in_vocab, model_load_path=args.model_load_path)
@@ -218,6 +284,8 @@ def main_lm(args):
 
     callback_fn = get_callback_fn(
         args, language_model, model, in_vocab, datasets)
+    
+    regularizer = get_regularizer(args, in_vocab)
 
     device = torch.device(f"cuda:{args.gpu_id}")
     model.to(device)
@@ -242,6 +310,7 @@ def main_lm(args):
             args.save_interval,
             in_vocab=in_vocab,
             callback_fn=callback_fn,
+            regularizer = regularizer
         )
 
 
@@ -271,6 +340,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
     parser.add_argument("--eval_only", action="store_true")
+    parser.add_argument("--dump_errs", action="store_true")
+    parser.add_argument("--dump_file", type=str, default="")
     parser.add_argument("--vec_dim", type=int, default=512)
     parser.add_argument("--gpu_id", type=int, default=0)
     parser.add_argument("--n_heads", type=int, default=4)
@@ -279,16 +350,26 @@ if __name__ == "__main__":
     parser.add_argument("--decoder_n_layers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--relative", type=bool, default=False)
+    parser.add_argument("--lm", type=bool, default=False)
+    parser.add_argument("--enc", type=bool, default=False)
+    parser.add_argument("--lm_with_token_labels", type=bool, default=False, help="If enabled, LM backprops from per-token labels provided by dataset, instead of the shifted sequence")
+
+    parser.add_argument("--regularize", type=bool, default=False, help="Turn on tree regularization.")
+    parser.add_argument("--mean_regularize", type=bool, default=False, help="Use mean version of regularizer.")
+    parser.add_argument("--distance_fn", type=str, default="cosine", help="Distance function used by regularization.")
+    parser.add_argument("--regularize_all", type=bool, default=False, help="Regularize using all strings in training set (just keep this off).")
+    parser.add_argument("--regularizer_rel_wt", type=float, default=0.1, help="Initial relative weight of regularizer wrt objective loss.")
+    parser.add_argument("--regularizer_steps", type=int, default=2, help="Regularize every regularizer_steps training steps.")
+    parser.add_argument("--regularizer_delta", type=float, default=0.0, help="Increase relative weight of regularizer by this value every change_steps of training")
+    parser.add_argument("--change_steps", type=int, default=500, help="Increase relative weight of regularizer after this number of regularization steps")
+
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--batch_size_eval", type=int, default=8)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--eval_every", type=int, default=1000)
     parser.add_argument("--max_train_steps", type=int, default=20000)
 
-    parser.add_argument("--relative", type=bool, default=False)
-    parser.add_argument("--lm", type=bool, default=False)
-    parser.add_argument("--lm_with_token_labels", type=bool, default=False, help="If enabled, LM backprops from per-token labels provided by dataset, instead of the shifted sequence")
-    parser.add_argument("--enc", type=bool, default=False)
     parser.add_argument("--save_model", action="store_true", default=False)
     parser.add_argument("--save_interval", type=int, default=10000)
     # this is only used if args.dataset == pcfg
@@ -301,7 +382,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--callback", action="store_true")
     # args for ds-addmult-mod10
-    parser.add_argument("--dsam_data_file", type=str, default="data_utils/ds_addmult_mod10_data/data-addmult-231019.csv")
+    parser.add_argument("--dsam_data_file", type=str, default="data_utils/ds_addmult_mod10_data/data-addmult-231102-1.5m.csv")
     parser.add_argument("--dsam_min_tree_height", type=int, default=1)
     parser.add_argument("--dsam_max_tree_height", type=int, default=4)
     parser.add_argument("--dsam_max_tree_width", type=int, default=80)

@@ -127,6 +127,7 @@ def build_dataset_addmult_mod10(
             'in': tokenizer(example['example'] + '=' + str(example['ans_mod10'])),
             'in_len': len(tokenizer(example['example'] + '=' + str(example['ans_mod10']))),
             'idxs': idx,
+            'string': example['example']
         }, with_indices=True,
         remove_columns=remove_columns)
     elif lm_mode and use_intermediates:
@@ -144,14 +145,20 @@ def build_dataset_addmult_mod10(
             'in_len': len(tokenizer(example['example'])),
             'labels': example['ans_mod10'],
             'idxs': idx,
+            'string': example['example']
         }, with_indices=True,
         remove_columns=remove_columns)
 
     return dataset, tokenizer
 
 
-def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, has_token_labels=False):
-    """PROTOTYPE. Not finished"""
+def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, has_token_labels=False, dump=False, dump_file_path=""):
+    """
+    PROTOTYPE. Not finished
+    
+    dump, dump_file_path: if dump is True, dump all incorrectly predicted
+        examples to dump_file_path. Only works for EncDec models.
+    """
     # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
     # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
     # If has_token_labels is True, dataset includes labels for each token, not just one final label.
@@ -203,13 +210,22 @@ def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, ha
                 total_count += label.size(0)
                 correct_count += (predicted_class == label).sum().item()
 
+                if (dump):
+                    with open(dump_file_path, 'w') as dump_file:
+                        strings = batch['string']
+                        label = label.cpu().numpy()
+                        predicted_class = predicted_class.cpu().numpy()
+                        for idx in range(len(label)):
+                            if (label[idx] != predicted_class[idx]):
+                                dump_file.write(strings[idx] + '\n')
+
 
     # Calculate accuracy
     accuracy = correct_count / total_count
     print(f'Accuracy on {split} data: {accuracy:.2f}')
     return accuracy
 
-def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32):
+def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32, dump=False, dump_file_path=""):
     """PROTOTYPE. Not finished"""
     # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
     # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
@@ -234,6 +250,13 @@ def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32):
     out = out[:, desired_out_idx]
     decoded = out.argmax(dim = 1)
     acc = [int(desired_out[i]) == target for i, target in zip(decoded, targets)]
+
+    if (dump):
+        with open(dump_file_path, 'w') as dump_file:
+            decoded = decoded.cpu().numpy()
+            for idx in range(len(targets)):
+                if (targets[idx] != int(desired_out[decoded[idx][0]])):
+                    dump_file.write(queries[idx][:-1] + '\n')
 
     acc = sum(acc)/len(targets)
     return acc

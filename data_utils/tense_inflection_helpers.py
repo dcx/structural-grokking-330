@@ -2,7 +2,7 @@
 
 from vocabulary import WordVocabulary
 from datasets import Dataset as HFDataset
-from util import run_lm_decoding
+from util import run_lm_decoding, process_split
 import random
 import os
 
@@ -142,7 +142,6 @@ def read_ti_data(splits, do_process=True):
                 in_sentences.append(sent)
     return in_sentences, index_map
 
-
 def build_datasets_tense_inflection():
     def get_subset(elem_list, idx_list):
         return [elem_list[idx] for idx in idx_list]
@@ -157,10 +156,12 @@ def build_datasets_tense_inflection():
         in_subset = get_subset(in_sentences, index_map[split])
         in_subset_tokenized = [in_vocab(s) for s in in_subset]
         in_lens = [len(s) for s in in_subset_tokenized]
+        req_str, _ = process_split(in_subset, split_by_words=["PRESENT", "PAST"])
         data = {
             "in": in_subset_tokenized,
             "in_len": in_lens,
             "idxs": index_map[split],
+            "string": req_str
         }
         dataset_curr = HFDataset.from_dict(data)
         dataset[split] = dataset_curr

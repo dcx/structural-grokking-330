@@ -281,7 +281,7 @@ class TransformerEncDecModel(torch.nn.Module):
 
         self.register_buffer("int_seq", torch.arange(max_len, dtype=torch.long))
         self.relative = relative
-        if (relative):
+        if relative:
             transformer = RelativeTransformer
         else:
             transformer = Transformer

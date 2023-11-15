@@ -157,6 +157,7 @@ def get_all_hidden_states_scratch(
     start_relax_layer=0,
     layer_id=-1,
     is_lm=False,
+    compute_grad=False
 ):
     def relax_cond(mask, relax_mask, num_layers):
         ### relax mask only masks padded stuff
@@ -206,15 +207,21 @@ def get_all_hidden_states_scratch(
             else:
                 mask = model.generate_len_mask(inp_len, input_lens).to(device)
                 mask_mult = mask.unsqueeze(-1)
-            model.eval()
-            with torch.no_grad():
+            if (not compute_grad):
+                model.eval()
+                with torch.no_grad():
+                    outputs = [model.encoder_only(inputs, mask, layer_id=layer_id)]
+            else:
                 outputs = [model.encoder_only(inputs, mask, layer_id=layer_id)]
 
             # remove vectors for masked stuff
             # REMEMBER: mask is 1 if the token is not attended to, and 0 if the token is attended to.
             outputs = [hs * (~mask_mult) for hs in outputs]
             for idx, _ in enumerate(cslice):
-                hidden_states = [outputs[0][idx].cpu().numpy()]
+                if (not compute_grad):
+                    hidden_states = [outputs[0][idx].cpu().numpy()]
+                else:
+                    hidden_states = [outputs[0][idx]]
                 if sum_all:
                     # the first thing is the [CLS] or [start id] which we ignore
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
@@ -242,9 +249,10 @@ def get_cumulants(hs, idx_list):
     try:
         return np.stack(all_vecs, axis=0)
     except:
-        import pdb
+        return torch.stack(all_vecs, axis = 0)
+        # import pdb
 
-        pdb.set_trace()
+        # pdb.set_trace()
 
 
 def get_idxs(phrase_tokens, sent_tokens, st):
@@ -262,6 +270,7 @@ def get_word_vecs_from_subwords(
     cumulants = []
     if pre_tokenized:
         sent_token_list, word_tokens_all = pre_tokenized
+        # print(pre_tokenized)
     else:
         sent_token_list = tokenizer(input_list, padding=True).input_ids
     for idx, input_str in enumerate(input_list):
@@ -285,13 +294,18 @@ def get_word_vecs_from_subwords(
     return cumulants
 
 
-def mask_all_possible(input_str, tokenizer, masking_type="attention"):
+def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=True):
     """
     masking_type can be token or attention
     """
-    all_tokens = input_str.split(" ")
+    if (spaces):
+        all_tokens = input_str.split(" ")
+    else:
+        all_tokens = [str(_) for _ in input_str]
     tokenized_inp = tokenizer(input_str)
     word_tokenized = [tokenizer(word, add_special_tokens=False) for word in all_tokens]
+    # print(all_tokens)
+    # print(word_tokenized)
 
     # the starting point of each word
     st_p = 0
@@ -306,6 +320,7 @@ def mask_all_possible(input_str, tokenizer, masking_type="attention"):
 
     # the final thing might be a special token too. 0_0
     en_p = len(tokenized_inp) - cumulants[-1]
+    # print(en_p)
     # en_p is 0 for an LM, and non-zero if there are special tokens at the end
     assert en_p >= 0
 
@@ -344,7 +359,7 @@ def mask_all_possible(input_str, tokenizer, masking_type="attention"):
     return all_inputs
 
 
-def get_masking_info(tokenizer, input_strs, masking_type="attention"):
+def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=True):
     masked_strs = []
     curr = 0
     sentence2idx_tuple = []
@@ -353,7 +368,7 @@ def get_masking_info(tokenizer, input_strs, masking_type="attention"):
     else:
         input_masks = None
     for inp in input_strs:
-        input_dict = mask_all_possible(inp, tokenizer, masking_type=masking_type)
+        input_dict = mask_all_possible(inp, tokenizer, masking_type=masking_type, spaces=spaces)
         curr_keys = [k for k in input_dict]
         if masking_type == "attention":
             masked_strs += [inp] * len(input_dict)
@@ -503,6 +518,8 @@ def get_tree_projection(
         layer_id=layer_id,
         is_lm=is_lm,
     )
+    # print(masked_strs)
+    # print(input_masks)
     keys = sentence2idx_tuple[0]
 
     if sim_fn == "euclidean":
