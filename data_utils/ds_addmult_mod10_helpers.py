@@ -7,7 +7,7 @@ from torch.utils.data import (
     RandomSampler,
     SequentialSampler,
 )
-import re
+import re, random
 import collate
 from tqdm import tqdm
 from util import test_continuations
@@ -20,6 +20,8 @@ def build_dataset_addmult_mod10(
     max_tree_width: int = 80, 
     hold_out_n_unique_examples: int = 0,
     hold_out_regex: Optional[str] = None,
+    hold_out_p_subtrees: float = 0.0,
+    max_held_examples: int = None,
     lm_mode: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
     """
@@ -35,7 +37,9 @@ def build_dataset_addmult_mod10(
     max_tree_height (int): The maximum height for the trees in the dataset.
     max_tree_width (int): The maximum width for the trees in the dataset.
     hold_out_n_unique_examples (int): Take this many unique examples and use them as the test set.
-    make_unique (bool): If True, before doing anything else, drop all duplicate examples from the dataset.
+    hold_out_regex (Optional[str]): Take examples that match this regex and use them as the test set.
+    hold_out_p_subtrees (int): Sample this percent of all unique subtrees, and use all items that match them as the test set.
+    max_held_examples (int): If provided, sample this many examples from the held out set.
 
     Returns:
     Tuple[DatasetDict, CharVocabulary]: A tuple containing the processed huggingface dataset and the tokenizer used.
@@ -73,16 +77,27 @@ def build_dataset_addmult_mod10(
             else:
                 dataset_held = concatenate_datasets([dataset_held, dataset_held_regex])
 
+    if hold_out_p_subtrees > 0.0:
+        # sample unique subtrees
+        ds_uniques = set(dataset.unique('tree_sig'))
+        n_subtrees = int(len(ds_uniques) * hold_out_p_subtrees)
+        held_out_subtrees = set(random.sample(ds_uniques, n_subtrees))
 
+        # hold out all examples that match those subtrees
+        dataset_held_subtrees = dataset.filter(lambda example: example['tree_sig'] in held_out_subtrees, num_proc=8)
+        dataset_remainder = dataset.filter(lambda example: example['tree_sig'] not in held_out_subtrees, num_proc=8)
+        print(f"{len(held_out_subtrees)}/{len(ds_uniques)} randomly held out subtrees: {held_out_subtrees}")
+        dataset = dataset_remainder
+        print(f"# held out examples via subtree exclusion: {len(dataset_held_subtrees)}")
+        if len(dataset_held_subtrees) > 0:
+            if dataset_held is None:
+                dataset_held = dataset_held_subtrees
+            else:
+                dataset_held = concatenate_datasets([dataset_held, dataset_held_subtrees])
 
-    # # demo: hold out examples with a certain string (we aren't doing this yet)
-    # if held:
-    #     dataset_held = dataset.filter(lambda example: held in example['example'])
-    # if remainder:
-    #     dataset_remainder = dataset.filter(lambda example: remainder not in example['example'])
-
-
-    # split into train, val, test
+    if dataset_held is not None and max_held_examples is not None:
+        dataset_held = dataset_held.train_test_split(train_size=max_held_examples, shuffle=True)['train']
+        print(f"Cutting down held out set tp max_held_examples: {len(dataset_held)}")
 
     if dataset_held is None:
         train_valtest = dataset.train_test_split(test_size=0.2, shuffle=False)
@@ -100,7 +115,7 @@ def build_dataset_addmult_mod10(
     })
 
     tokenizer = CharVocabulary(chars=set('0123456789+*()='))
-    remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10']
+    remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10', 'tree_sig']
     if lm_mode:
         dataset = dataset.map(lambda example, idx: {  
             'in': tokenizer(example['example'] + '=' + str(example['ans_mod10'])),
