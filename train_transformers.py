@@ -23,6 +23,8 @@ from transformer_helpers import create_model, create_lm, create_model_interface
 from training_utils import train_loop
 from regularizer_new import Chart
 
+from evaluate_transformers import evaluate_network
+
 WANDB_USERS = {
     "kyle": {"project": "research-cs330", "entity": "mcgrathk"},
     "derek": {"project": "330", "entity": "dcx"},
@@ -293,7 +295,7 @@ def main_lm(args):
     eval_keys = ["val", "test"]
 
     if args.eval_only:
-        raise ValueError("Testing functionality not implemented yet!")
+        evaluate_network(args, interface, datasets['test'], tokenizer=in_vocab)
     else:
         train_loop(
             args,
@@ -329,7 +331,7 @@ def validate_args(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_load_path", type=str, default="",
-                        help="Path of model to resume training, or ")
+                        help="Path of model to resume training, or evaluate")
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
     parser.add_argument("--eval_only", action="store_true")
@@ -381,8 +383,12 @@ if __name__ == "__main__":
     parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
 
 
+    # Evaluation args. This should be a subprogram if we feel comfortable to refactor to click.
+    parser.add_argument("--eval_only", action="store_true")
+    parser.add_argument("--eval_single_input", type=str, default='')
+    parser.add_argument("--eval_dataset", action="store_true", default=False)
+    parser.add_argument("--eval_confusion_matrix", action="store_true", default=False)
 
-    
 
     args = parser.parse_args()
 
