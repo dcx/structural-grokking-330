@@ -334,12 +334,9 @@ if __name__ == "__main__":
                         help="Path of model to resume training, or evaluate")
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
-<<<<<<< Updated upstream
     parser.add_argument("--eval_only", action="store_true")
     parser.add_argument("--dump_errs", action="store_true")
     parser.add_argument("--dump_file", type=str, default="")
-=======
->>>>>>> Stashed changes
     parser.add_argument("--vec_dim", type=int, default=512)
     parser.add_argument("--gpu_id", type=int, default=0)
     parser.add_argument("--n_heads", type=int, default=4)
