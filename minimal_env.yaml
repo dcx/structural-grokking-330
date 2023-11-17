@@ -16,5 +16,7 @@ dependencies:
   - tqdm==4.66.1
   - transformers
   - wandb
-  - pytorch
-
+  - pytorch-cuda==12.1
+  - pytorch::pytorch
+  - scikit-learn
+  - seaborn
