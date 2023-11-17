@@ -127,14 +127,6 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
-    Args:
-        args: Command line arguments.
-    """
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-
 
 def init_wandb(args):
     """
