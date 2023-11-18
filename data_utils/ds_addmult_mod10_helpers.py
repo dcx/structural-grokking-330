@@ -138,6 +138,7 @@ def build_dataset_addmult_mod10(
             'idxs': idx,
             'labels': tokenizer(str(example['ans_sublabels'])),
             'labels_len': len(str(example['ans_sublabels'])) - str(example['ans_sublabels']).count('_'), # number of close brackets
+            'string': example['example']
         }, with_indices=True,
         remove_columns=remove_columns)
     else:
