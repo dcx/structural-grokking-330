@@ -13,7 +13,7 @@ from random import randint
 from time import time
 
 class Chart():
-    def __init__(self, sim_metric, tokenizer, spaces):
+    def __init__(self, sim_metric, tokenizer, spaces, hinge_const):
         # Initialize the SCI chart
         self.sim_metric = sim_metric
 
@@ -21,6 +21,7 @@ class Chart():
         self.train_data_collator = collate.VarLengthCollate(None)
         self.spaces = spaces # False for AddMult!
         self._cache = {}
+        self.hinge_const = hinge_const
 
     def relax_cond(self, mask, relax_mask, start_relax_layer, num_layers):
         ### relax mask only masks padded stuff
@@ -172,7 +173,8 @@ class Chart():
                 else:
                     k_rand = randint(st, en-1)
                     norm_score = best_score - score_chart[(st,k_rand)] - score_chart[(k_rand+1,en)]
-        
+
+                norm_score = min(norm_score, self.hinge_const)
                 return s1 + s2 + norm_score
 
         scores = []

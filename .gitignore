@@ -10,3 +10,7 @@ nohup.out
 checkpoints
 tree_projections/__pycache__
 runs
+dsmult.sh
+__init__.cpython*
+eval_helpers.cpython*
+tree_utils.cpython*

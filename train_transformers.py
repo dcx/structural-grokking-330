@@ -209,9 +209,9 @@ def get_regularizer(args, in_vocab):
         dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
     if (args.regularize):
         if args.dataset == "ds-addmult-mod10":
-            regularizer = Chart(dist_fn, in_vocab, spaces=False)
+            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const)
         else:
-            regularizer = Chart(dist_fn, in_vocab, spaces=True)
+            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const)
     else:
         regularizer = None
     return regularizer
@@ -316,6 +316,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--eval_every", type=int, default=1000)
     parser.add_argument("--max_train_steps", type=int, default=20000)
+    parser.add_argument("--compute_grad_dot", action="store_true")
+    parser.add_argument("--hinge_const", type=float, default=10.0)
 
     parser.add_argument("--save_model", action="store_true", default=False)
     parser.add_argument("--save_interval", type=int, default=10000)
@@ -336,7 +338,6 @@ if __name__ == "__main__":
     parser.add_argument("--dsam_hold_out_n_unique_examples", type=int, default=0, help="Hold out this many unique examples and use them as the test set.")
     parser.add_argument("--dsam_hold_out_percent", type=float, default=0.0, help="Hold out this percent of unique examples and use them as the test set.")
     parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
-
 
 
     

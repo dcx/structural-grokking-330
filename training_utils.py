@@ -211,6 +211,7 @@ def train_loop(
     regularizer_delta = args.regularizer_delta
     regularizer_rel_wt = args.regularizer_rel_wt
     regularize_all = args.regularize_all
+    compute_dot = args.compute_grad_dot
 
     opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
@@ -222,7 +223,8 @@ def train_loop(
         train_data_collator = collate.VarLengthCollate(tokenizer)
 
     best_ppl = {key: 10000.0 for key in val_datasets}
-
+    sci_grads = None
+    loss_grads = None
     while True:
         # print(train_dataset)
         train_dataloader = DataLoader(
@@ -270,6 +272,18 @@ def train_loop(
                         fin_sci_score = torch.mean(torch.stack(sci_scores))
                         sci_loss = -regularizer_rel_wt * fin_sci_score
                         sci_loss.backward()
+                        if compute_dot:
+                            parameters = [
+                                p for p in model.model.parameters() if p.requires_grad
+                            ]
+                            sci_grads = []
+                            for p in parameters:
+                                if (p.grad == None):
+                                    sci_grads.append(None)
+                                else:
+                                    param = p.grad.cpu().data
+                                    sci_grads.append(param)
+                            model.model.zero_grad()
                         accum_strings = []
                         regularizer_steps_decay += 1
                         if (regularizer_steps_decay % change_steps == 0):
@@ -278,9 +292,24 @@ def train_loop(
 
                 
                 losses.append(loss_curr.item())
-
                 loss_curr /= accum_steps
                 loss_curr.backward()
+                if compute_dot:
+                    parameters = [
+                        p for p in model.model.parameters() if p.requires_grad
+                    ]
+                    loss_grads = []
+                    for p in parameters:
+                        if (p.grad == None):
+                            loss_grads.append(None)
+                        else:
+                            param = p.grad.cpu().data
+                            loss_grads.append(param)
+                    avg_dot = 0
+                    for idx in range(len(loss_grads)):
+                        if (loss_grads[idx] is not None and sci_grads[idx] is not None):
+                            curr_term = torch.sum(loss_grads[idx]*sci_grads[idx])
+                            avg_dot += curr_term
                 if len(losses) == accum_steps:
                     num_steps += 1
                     torch.nn.utils.clip_grad_norm_(
@@ -291,14 +320,25 @@ def train_loop(
                     )
                     grad_norm = get_grad_norm(model.model)
                     if (regularizer is not None):
-                        wandb.log(
-                            {
-                                "loss": sum(losses),
-                                "grad_norm": grad_norm,
-                                "iteration": num_steps,
-                                "sci_score": fin_sci_score
-                            }
-                        )
+                        if compute_dot:
+                            wandb.log(
+                                {
+                                    "loss": sum(losses),
+                                    "grad_norm": grad_norm,
+                                    "iteration": num_steps,
+                                    "avg_dot": avg_dot,
+                                    "sci_score": fin_sci_score
+                                }
+                            )
+                        else:
+                            wandb.log(
+                                {
+                                    "loss": sum(losses),
+                                    "grad_norm": grad_norm,
+                                    "iteration": num_steps,
+                                    "sci_score": fin_sci_score
+                                }
+                            )
                     else:
                         wandb.log(
                             {
