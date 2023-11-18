@@ -10,3 +10,5 @@ nohup.out
 checkpoints
 tree_projections/__pycache__
 runs
+logs/
+.ipynb_checkpoints/
