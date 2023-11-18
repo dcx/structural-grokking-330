@@ -118,15 +118,28 @@ class WordVocabulary:
 
 
 class CharVocabulary:
-    def __init__(self, chars: Optional[Set[str]]):
+    def __init__(self, chars: Optional[Set[str]], ignore_char: Optional[str] = None, ignore_char_idx: Optional[int] = 0):
+        """
+        ignore_char: Used for padding and masking backprop. Must be in chars.
+        ignore_char_idx: Index of ignore_char in chars. Must be in chars. Must be a valid index.
+        """
         self.initialized = False
+        self.ignore_char = ignore_char
+        self.ignore_char_idx = ignore_char_idx
         if chars is not None:
             self.from_set(chars)
 
     def from_set(self, chars: Set[str]):
-        chars = list(sorted(chars))
+        if self.ignore_char is not None:
+            # ensure ignore char at ignore_char_idx
+            chars_noig = list(sorted(chars - {self.ignore_char}))
+            chars = chars_noig[:self.ignore_char_idx] + [self.ignore_char] + chars_noig[self.ignore_char_idx:]
+        else:
+            chars = list(sorted(chars))
+
         self.to_index = {c: i for i, c in enumerate(chars)}
         self.from_index = {i: c for i, c in enumerate(chars)}
+
         self.initialized = True
 
     def __len__(self):

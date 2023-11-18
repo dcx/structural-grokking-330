@@ -1,0 +1,53 @@
+# sweep which tests hparam range for new hybrid model head
+# (these aren't really code artifacts, but I'm including them to share intuition about how to use sweeps)
+# > wandb sweep --project 330 sweeps/[sweepfile]
+
+program: train_transformers.py
+method: random
+
+metric: # not required for random search
+  name: test_aux
+  goal: maximize
+
+parameters:
+  dataset:
+    value: "ds-addmult-mod10"
+  save_dir:
+    value: "temp-231110-sw/"
+  encoder_n_layers:
+    min: 3
+    max: 6
+  vec_dim:
+    value: 512
+  n_heads:
+    min: 4
+    max: 6
+  lr:
+    min: 1e-5
+    max: 1e-3
+    distribution: log_uniform_values
+  weight_decay:
+    min: 0.01
+    max: 0.5
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--callback"
+  - "--dataset=ds-addmult-mod10"
+  - "--lm=True"
+  - "--save_dir=temp-231110-01/"
+  - "--vec_dim=512"
+  - "--eval_every=2000"
+  - "--max_train_steps=20000"
+  - "--dsam_min_tree_height=3"
+  - "--dsam_max_tree_height=3" 
+  - "--dsam_max_tree_width=80"
+  - "--dsam_hold_out_n_unique_examples=400"
+  - "--dsam_data_file=data_utils/ds_addmult_mod10_data/data-addmult-231019.csv"
+  - "--lm_has_token_labels=True"
+  - "--relative=True"
+  - "--wandb_user=derek"
+  - "--batch_size=32"
+  - ${args}
