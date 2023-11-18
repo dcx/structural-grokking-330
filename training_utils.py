@@ -354,6 +354,7 @@ def train_loop(
 
                     # Save model if save_dir and save_interval has been hit
                     if (save_model and save_interval == 0):
+                        # Always save to same directory
                         if num_steps % 100000 == 0:
                             save_path = f"{os.path.join(save_dir, 'state')}.pt"
                             torch.save(model.model.state_dict(), save_path)
@@ -388,7 +389,6 @@ def train_loop(
                                 "test_aux": test_score,
                             }
                             wandb.log(wandbdict)
-
 
                     if num_steps > max_steps:
                         break
