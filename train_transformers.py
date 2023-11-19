@@ -95,7 +95,7 @@ def get_base_transformer_model(args, in_vocab: CharVocabulary, out_vocab: CharVo
     return model, interface
 
 
-def get_base_transformer_lm(args, in_vocab: CharVocabulary, model_load_path: str = None):
+def get_base_transformer_lm(in_vocab: CharVocabulary, vec_dim: int, n_heads: int, encoder_n_layers: int,  model_load_path: str = None):
     """
     Returns a base transformer language model and its interface.
 
@@ -107,8 +107,8 @@ def get_base_transformer_lm(args, in_vocab: CharVocabulary, model_load_path: str
     Returns:
         tuple: A tuple containing the model and its interface.
     """
-    model = create_lm(len(in_vocab), args.vec_dim,
-                      args.n_heads, args.encoder_n_layers)
+    model = create_lm(len(in_vocab), vec_dim,
+                      n_heads, encoder_n_layers)
     if model_load_path:
         print(f"INFO: Loading pretrained model from {model_load_path}")
         model.load_state_dict(torch.load(
@@ -285,7 +285,7 @@ def main_lm(args):
     
     regularizer = get_regularizer(args, in_vocab)
 
-    device = torch.device(f"cuda:{args.gpu_id}")
+    device = torch.device(args.device)
     model.to(device)
     if args.save_dir:
         dir_path = working_dir()
@@ -349,6 +349,7 @@ if __name__ == "__main__":
     parser.add_argument("--lm", type=bool, default=False)
     parser.add_argument("--enc", type=bool, default=False)
     parser.add_argument("--regularize", type=bool, default=False, help="Turn on tree regularization.")
+    parser.add_argument("--device", type=str, default='cuda', help="Default device to run computation on")
     parser.add_argument("--mean_regularize", type=bool, default=False, help="Use mean version of regularizer.")
     parser.add_argument("--distance_fn", type=str, default="cosine", help="Distance function used by regularization.")
     parser.add_argument("--regularize_all", type=bool, default=False, help="Regularize using all strings in training set (just keep this off).")

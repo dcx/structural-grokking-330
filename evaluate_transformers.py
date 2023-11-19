@@ -14,21 +14,24 @@ from transformers.data.data_collator import DataCollatorWithPadding
 from datasets import DatasetDict
 
 
-from torch.utils.data import (
-    DataLoader
-)
+from torch.utils.data import DataLoader
 
 import collate
 
 
-def package_data(input_text, tokenizer, device='cuda:0'):
+def package_data(input_text, tokenizer, device="cpu"):
+    input_text = enumerate(input_text)
 
-    data = [{'in': tokenizer(input_text),
-            'in_len': len(tokenizer(input_text)),
-            'labels': 0,
-            'idxs': 0,
-        }]
-    
+    data = [
+        {
+            "in": tokenizer(text),
+            "in_len": len(tokenizer(text)),
+            "labels": 0,
+            "idxs": idx,
+        }
+        for idx, text in input_text
+    ]
+
     collator = collate.VarLengthCollate(None)
     train_dataloader = DataLoader(
         data,
@@ -39,15 +42,15 @@ def package_data(input_text, tokenizer, device='cuda:0'):
 
     return out
 
-def prepare_dataset(dataset, batch_size=16):
 
+def prepare_dataset(dataset, batch_size=16):
     collator = collate.VarLengthCollate(None)
 
     train_dataloader = DataLoader(
-                dataset,
-                batch_size=batch_size,
-                collate_fn=collator,
-            )
+        dataset,
+        batch_size=batch_size,
+        collate_fn=collator,
+    )
     return train_dataloader
 
 
@@ -62,26 +65,27 @@ def decollate_batch(collated_batch, lengths):
 
     collated_batch = collated_batch.T
     for i, length in enumerate(lengths):
-        sequence = collated_batch[i][:int(length)] 
+        sequence = collated_batch[i][: int(length)]
         decollated.append(sequence)
     return decollated
-
-
 
 
 # Function to evaluate a single input statement
 def eval_single_input(model, input_data):
     with torch.no_grad():
         logits = model(input_data)
-    
 
     return logits
+
+
 # Function to run the model on an entire dataset
-def eval_dataset(model, tokenizer, dataset, device, output_path='logs/incorrect_predictions.csv'):
+def eval_dataset(
+    model, tokenizer, dataset, device, output_path="logs/incorrect_predictions.csv"
+):
     num_processed = 0
     num_incorrect = 0
 
-    in_vocabulary = CharVocabulary(chars=set('0123456789+*()='))
+    in_vocabulary = CharVocabulary(chars=set("0123456789+*()="))
     preds = []
     for batch in dataset:
         batch_gpu = {}
@@ -89,57 +93,58 @@ def eval_dataset(model, tokenizer, dataset, device, output_path='logs/incorrect_
             batch_gpu[key] = batch[key].to(device)
 
         batch_predictions = eval_single_input(model, batch_gpu).outputs.cpu()
-        decollated_batch = decollate_batch(batch['in'], batch['in_len'])
+        decollated_batch = decollate_batch(batch["in"], batch["in_len"])
 
         for idx, tokenized_in_text in enumerate(decollated_batch):
-            num_processed +=1
+            num_processed += 1
             in_text = in_vocabulary(tokenized_in_text.tolist())
             prediction = int(np.argmax(batch_predictions[idx]).cpu())
-            answer = int(batch['labels'][idx])
+            answer = int(batch["labels"][idx])
 
             if prediction != answer:
-                num_incorrect +=1
-            preds.append({
-                'input': in_text,
-                'predicted': prediction,
-                'answer': answer,
-                'correct': prediction == answer,
-            })
+                num_incorrect += 1
+            preds.append(
+                {
+                    "input": in_text,
+                    "predicted": prediction,
+                    "answer": answer,
+                    "correct": prediction == answer,
+                }
+            )
     print(f"{num_processed = }, {num_incorrect = }")
     # Convert to DataFrame and save to CSV
     incorrect_df = pd.DataFrame(preds)
     incorrect_df.to_csv(output_path, index=False)
+
 
 # Function to generate confusion matrix
 def generate_confusion_matrix(model, tokenizer, dataset, device):
     y_true = []
     y_pred = []
     for example in dataset:
-        true_answer = example['answer']
-        predicted_answer = eval_single_input(model, tokenizer, example['input'], device)
+        true_answer = example["answer"]
+        predicted_answer = eval_single_input(model, tokenizer, example["input"], device)
         y_true.append(true_answer)
         y_pred.append(predicted_answer)
-    
+
     # Calculate confusion matrix
     cm = confusion_matrix(y_true, y_pred)
     # Plot confusion matrix
-    sns.heatmap(cm, annot=True, fmt='d')
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
+    sns.heatmap(cm, annot=True, fmt="d")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
     plt.show()
 
 
-def evaluate_network(args, interface, test_dataset, device='cuda:0', tokenizer=None):
-
+def evaluate_network(args, interface, test_dataset, device="cpu", tokenizer=None):
     interface.model.eval()
 
-    mode = 'classification'
+    mode = "classification"
 
     if tokenizer is not None:
         train_data_collator = DataCollatorWithPadding(tokenizer=None)
     else:
         train_data_collator = collate.VarLengthCollate(tokenizer)
-
 
     # Evaluate a single statement if specified
     if args.eval_single_input:
@@ -148,10 +153,9 @@ def evaluate_network(args, interface, test_dataset, device='cuda:0', tokenizer=N
         input_data = package_data(input_text, tokenizer)
         output = eval_single_input(interface, input_data)
 
-        if mode == 'classification':
+        if mode == "classification":
             selected_class = int(np.argmax(output.outputs.cpu(), axis=1))
         print(f"Input: {input_text}, Output from model: {selected_class}")
-
 
     # Evaluate on the entire dataset if specified
     if args.eval_dataset:

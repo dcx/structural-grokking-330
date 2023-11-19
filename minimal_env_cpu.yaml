@@ -1,6 +1,7 @@
-name: minimal_env
+name: minimal_env_cpu
 channels:
   - conda-forge
+  - nvidia
   - pytorch
 dependencies:
   - python==3.9
@@ -8,7 +9,7 @@ dependencies:
   - tensorboard
   - hypothesis==6.88.1
   - lark==1.1.7
-  - matplotlib==3.8.0
+  - matplotlib
   - numpy
   - Pillow
   - scipy==1.11.3
@@ -18,3 +19,7 @@ dependencies:
   - pytorch::pytorch
   - scikit-learn
   - seaborn
+  - jupyter
+  - pip
+  - pip:
+    - bertviz

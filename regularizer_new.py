@@ -39,13 +39,13 @@ class Chart():
         
         return self._cache[input_str]
 
-    def build_scores(self, input_str, model, start_relax_layer, tqdm_disable=True, parse_splits=None, batch=True):
+    def build_scores(self, input_str, model, start_relax_layer, tqdm_disable=True, parse_splits=None, batch=True, device='cpu'):
         # Build SCI chart
         if batch:
             scores = [{} for _ in input_str]
         else:
             scores = {}
-        device = torch.device("cuda")
+        device = torch.device(device)
         # Required for testing
         # model.to(device)
         if (type(model) != torch.nn.Module):
@@ -148,7 +148,7 @@ class Chart():
 
         return scores
     
-    def get_score(self, score_chart, mean=True):
+    def get_score(self, score_chart, mean=True, device='cpu'):
 
         def recurse(score_chart, st, en):
             if (st == en):
@@ -176,7 +176,7 @@ class Chart():
                 return s1 + s2 + norm_score
 
         scores = []
-        device = torch.device("cuda")
+        device = torch.device(device)
         for chart in score_chart:
             end = max([key[1] for key in chart])
             score = recurse(chart, 0, end)
