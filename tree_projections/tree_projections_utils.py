@@ -294,7 +294,7 @@ def get_word_vecs_from_subwords(
     return cumulants
 
 
-def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=True):
+def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=True, single=False):
     """
     masking_type can be token or attention
     """
@@ -351,15 +351,22 @@ def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=Tru
     # st = [0, 1, 2, ..., sz - l-1]
     all_inputs = {}
     # get new attention masks.
-    for l in range(1, sz + 1):
-        for st in range(sz - l + 1):
-            en = st + l
-            # only the stuff from st:en can be attended to.
-            all_inputs[(st, en - 1)] = generate_attention_mask(st, en)
+    if (single):
+        # Only regularize on top-layer decision
+        for st in range(sz):
+            all_inputs[(st, sz - 1)] = generate_attention_mask(st, sz)
+        for en in range(1, sz):
+            all_inputs[(0, en - 1)] = generate_attention_mask(0, en)
+    else:
+        for l in range(1, sz + 1):
+            for st in range(sz - l + 1):
+                en = st + l
+                # only the stuff from st:en can be attended to.
+                all_inputs[(st, en - 1)] = generate_attention_mask(st, en)
     return all_inputs
 
 
-def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=True):
+def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=True, single=False):
     masked_strs = []
     curr = 0
     sentence2idx_tuple = []
@@ -368,7 +375,7 @@ def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=Tru
     else:
         input_masks = None
     for inp in input_strs:
-        input_dict = mask_all_possible(inp, tokenizer, masking_type=masking_type, spaces=spaces)
+        input_dict = mask_all_possible(inp, tokenizer, masking_type=masking_type, spaces=spaces, single=single)
         curr_keys = [k for k in input_dict]
         if masking_type == "attention":
             masked_strs += [inp] * len(input_dict)

@@ -1,5 +1,6 @@
 ### regularizes a model to encourage structural generalization
 from asyncio import as_completed
+from matplotlib.pyplot import streamplot
 import torch
 from tree_projections.tree_projections_utils import get_all_hidden_states_scratch, get_masking_info, get_pre_tokenized_info
 from tqdm import tqdm
@@ -13,7 +14,7 @@ from random import randint
 from time import time
 
 class Chart():
-    def __init__(self, sim_metric, tokenizer, spaces, hinge_const):
+    def __init__(self, sim_metric, tokenizer, spaces, hinge_const, dataset, sample_num = -1, sample_len = 8, depth_limit=-1, single = False):
         # Initialize the SCI chart
         self.sim_metric = sim_metric
 
@@ -22,6 +23,19 @@ class Chart():
         self.spaces = spaces # False for AddMult!
         self._cache = {}
         self.hinge_const = hinge_const
+        self.dataset = dataset
+
+        # phrase sampler version of regularizer: sample small phrases from the input and calculate
+        self.sample_num = sample_num
+        self.sample_len = sample_len
+
+        # depth limited version of regularizer: computation only for last d layers of Chart
+        self.depth_limit = depth_limit
+
+        # try out top-layer decision idea
+        self.single = single
+
+        # R2D2 optimizations for CKY parsing
 
     def relax_cond(self, mask, relax_mask, start_relax_layer, num_layers):
         ### relax mask only masks padded stuff
@@ -39,6 +53,109 @@ class Chart():
             self._cache[input_str] = (slice_dict, masked_strs, input_masks)
         
         return self._cache[input_str]
+    
+    def get_phrases(self, str):
+        phrases = set()
+
+        # Guaranteed that str is larger than phrase len
+        for iter in range(self.sample_num):
+            if (self.dataset in ["ds-addmult-mod10", "dyck"]):
+                # ensure phrases are the largest nested subtree
+                print(str)
+                if (self.dataset == "dyck"):
+                    str = str.split(" ")
+                start = randint(0, len(str) - self.sample_len - 1)
+                start_brack = -1
+                for pos in range(start, len(str)):
+                    if (self.dataset == "dyck"):
+                        if (str[pos][0] == '('):
+                            start_brack = pos
+                            break
+                    else:
+                        if (str[pos] == '('):
+                            start_brack = pos
+                            break
+                if (start_brack == -1):
+                    if (self.dataset == "dyck"):
+                        str = " ".join(str)
+                    continue
+                depth = 0
+                end_brack = -1
+                for pos in range(start_brack, len(str)):
+                    if (self.dataset == "dyck"):
+                        if (str[pos][0] == '('):
+                            depth += 1
+                        elif (str[pos][-1] == ')'):
+                            depth -= 1
+                    else:
+                        if (str[pos] == '('):
+                            depth += 1
+                        elif (str[pos] == ')'):
+                            depth -= 1
+                    if (depth == 0):
+                        end_brack = pos
+                        break
+                if (end_brack == -1):
+                    if (self.dataset == "dyck"):
+                        str = " ".join(str)
+                    continue
+                # allow some relaxation in subtree length, as most samplings will be small
+                if (end_brack - start_brack > 2*self.sample_len):
+                    if (self.dataset == "dyck"):
+                        str = " ".join(str)
+                    continue
+                if (self.dataset == "dyck"):
+                    phrase = " ".join(str[start : start + self.sample_len + 1])
+                    str = " ".join(str)
+                else:
+                    phrase = str[start_brack : end_brack + 1]
+                phrases.add(phrase)
+            else:
+                # simple sampling
+                split_str = str.split(" ")
+                start = randint(0, len(split_str) - self.sample_len - 1)
+                phrase = " ".join(split_str[start : start + self.sample_len + 1])
+                phrases.add(phrase)
+        
+        return list(phrases)
+    
+
+    def phrase_split(self, input_str, batch):
+        # Split input into smaller phrases to get past O(n^2) computation
+
+        if batch:
+            outer_input = input_str
+        else:
+            outer_input = [input_str]
+
+        if (self.sample_num != -1):
+            # perform sampling
+            sampled_input = []
+            for str in outer_input:
+                if (self.dataset in ["ds-addmult-mod10"]):
+                    if (len(str) <= self.sample_len):
+                        # Don't sample
+                        sampled_input += [str]
+                    else:
+                        sampled_input += self.get_phrases(str)
+                else:
+                    split_str = str.split(" ")
+                    if (len(split_str) <= self.sample_len):
+                        # Don't sample
+                        sampled_input += [str]
+                    else:
+                        sampled_input += self.get_phrases(str)
+            outer_input = sampled_input
+
+        # print(outer_input)
+
+        # Init SCI chart
+        if (not batch and self.sample_num == -1):
+            scores = {}
+        else:
+            scores = [{} for _ in outer_input]
+
+        return outer_input, scores
 
     def build_scores(self, input_str, model, start_relax_layer, tqdm_disable=True, parse_splits=None, batch=True):
         # Build SCI chart
@@ -61,21 +178,14 @@ class Chart():
             else:
                 return self.tokenizer(s)
 
-        if batch:
-            batch_sent_tokens, batch_idxs = [], []
-            for curr_str in input_str:
-                sent_tokens, idxs = get_pre_tokenized_info(curr_str, tokenizer_helper)
-                batch_sent_tokens.append(sent_tokens)
-                batch_idxs.append(idxs)
-        else:
-            sent_tokens, idxs = get_pre_tokenized_info(input_str, tokenizer_helper)
-            batch_sent_tokens = [sent_tokens]
-            batch_idxs = [idxs]
+        outer_input, scores = self.phrase_split(input_str, batch)
 
-        if batch:
-            outer_input = input_str
-        else:
-            outer_input = [input_str]
+        batch_sent_tokens, batch_idxs = [], []
+        for curr_str in outer_input:
+            sent_tokens, idxs = get_pre_tokenized_info(curr_str, tokenizer_helper)
+            batch_sent_tokens.append(sent_tokens)
+            batch_idxs.append(idxs)
+
         outer_context_vecs = get_all_hidden_states_scratch(curr_model,
                                                             tokenizer_helper,
                                                             outer_input,
@@ -87,9 +197,11 @@ class Chart():
                                                         )
 
 
-        slice_dict, masked_strs, input_masks = get_masking_info(tokenizer_helper, outer_input, spaces=self.spaces)
+        slice_dict, masked_strs, input_masks = get_masking_info(tokenizer_helper, outer_input, spaces=self.spaces, single=self.single)
 
-        if batch:
+        if (not batch and self.sample_num == -1):
+            pre_tokenized_construct = (batch_sent_tokens * len(masked_strs), batch_idxs * len(masked_strs))
+        else:
             str_to_slice = {}
 
             str_num = 0
@@ -104,8 +216,6 @@ class Chart():
                 pre_tokenized_construct[0] += [batch_sent_tokens[_]] * num_req
                 pre_tokenized_construct[1] += [batch_idxs[_]] * num_req
             pre_tokenized_construct = tuple(pre_tokenized_construct)
-        else:
-            pre_tokenized_construct = (batch_sent_tokens * len(masked_strs), batch_idxs * len(masked_strs))
 
         inner_context_vecs = get_all_hidden_states_scratch(
                         curr_model,
@@ -121,7 +231,19 @@ class Chart():
                         compute_grad=True
                     )
 
-        if batch:
+        if (not batch and self.sample_num == -1):
+            all_vector_idxs = outer_context_vecs[0][-1]
+            for idx, key in slice_dict[0]:
+                st, en = key
+
+                fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
+                    axis=0
+                )
+                inner_context_vectors = inner_context_vecs[idx][-1]
+                scores[key] = self.sim_metric(
+                    inner_context_vectors, fully_contextual_vectors
+                )
+        else:
             for str_idx in range(str_num):
                 all_vector_idxs = outer_context_vecs[str_idx][-1]
                 for idx, key in slice_dict[str_idx]:
@@ -134,18 +256,6 @@ class Chart():
                     scores[str_idx][key] = self.sim_metric(
                         inner_context_vectors, fully_contextual_vectors
                     )
-        else:
-            all_vector_idxs = outer_context_vecs[0][-1]
-            for idx, key in slice_dict[0]:
-                st, en = key
-
-                fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
-                    axis=0
-                )
-                inner_context_vectors = inner_context_vecs[idx][-1]
-                scores[key] = self.sim_metric(
-                    inner_context_vectors, fully_contextual_vectors
-                )
 
         return scores
     
@@ -181,7 +291,22 @@ class Chart():
         device = torch.device("cuda")
         for chart in score_chart:
             end = max([key[1] for key in chart])
-            score = recurse(chart, 0, end)
+            if (self.single):
+                best_score = -100
+                tot_score = 0
+                for k in range(0, end):
+                    cand_score = chart[(0,k)] + chart[(k+1,end)]
+                    tot_score += cand_score
+                    if (cand_score > best_score):
+                        best_score = cand_score
+                if mean:
+                    norm_score = best_score - (tot_score/(end))
+                else:
+                    k_rand = randint(0, end-1)
+                    norm_score = best_score - chart[(0,k_rand)] - chart[(k_rand+1,end)]
+                score = norm_score
+            else:
+                score = recurse(chart, 0, end)
             if (score == 0):
                 score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)
             scores.append(score.float())

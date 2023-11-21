@@ -167,7 +167,7 @@ def get_datasets_and_vocab(args, language_model: bool):
             use_intermediates=args.lm_with_token_labels,
             lm_mode=language_model)
     else:
-        datasets, in_vocab = build_datasets_lm()
+        datasets, in_vocab, _ = build_datasets_lm()
 
     return datasets, in_vocab
 
@@ -257,9 +257,9 @@ def get_regularizer(args, in_vocab):
         dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
     if (args.regularize):
         if args.dataset == "ds-addmult-mod10":
-            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const)
+            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single)
         else:
-            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const)
+            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single)
     else:
         regularizer = None
     return regularizer
@@ -364,6 +364,10 @@ if __name__ == "__main__":
     parser.add_argument("--regularizer_steps", type=int, default=2, help="Regularize every regularizer_steps training steps.")
     parser.add_argument("--regularizer_delta", type=float, default=0.0, help="Increase relative weight of regularizer by this value every change_steps of training")
     parser.add_argument("--change_steps", type=int, default=500, help="Increase relative weight of regularizer after this number of regularization steps")
+    parser.add_argument("--reg_sample_num", type=int, default=-1, help="Number of phrases sampled for regularization")
+    parser.add_argument("--reg_sample_len", type=int, default=10, help="Length of phrases sampled for regularization")
+    parser.add_argument("--reg_depth_limit", type=int, default=-1, help="Depth limited SCI computation")
+    parser.add_argument("--reg_single", action="store_true")
 
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--batch_size_eval", type=int, default=8)
