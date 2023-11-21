@@ -20,7 +20,7 @@ import collate
 
 
 def package_data(input_text, tokenizer, device="cpu"):
-    input_text = enumerate(input_text)
+    enum_input = enumerate(input_text)
 
     data = [
         {
@@ -29,15 +29,17 @@ def package_data(input_text, tokenizer, device="cpu"):
             "labels": 0,
             "idxs": idx,
         }
-        for idx, text in input_text
+        for idx, text in enum_input
     ]
 
     collator = collate.VarLengthCollate(None)
     train_dataloader = DataLoader(
         data,
         collate_fn=collator,
+        batch_size=16
     )
     data_dict = list(train_dataloader)[0]
+    # Send to device
     out = {k: v.to(device=device, non_blocking=True) for k, v in data_dict.items()}
 
     return out

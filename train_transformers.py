@@ -275,7 +275,7 @@ def main_lm(args):
 
     if language_model:
         model, interface = get_base_transformer_lm(
-            args, in_vocab, model_load_path=args.model_load_path)
+             in_vocab, args.vec_dim, args.n_heads, args.encoder_n_layers, model_load_path=args.model_load_path)
     else:
         model, interface = get_base_transformer_model(
             args, in_vocab, out_vocab, model_load_path=args.model_load_path)
@@ -334,7 +334,6 @@ if __name__ == "__main__":
                         help="Path of model to resume training, or evaluate")
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
-    parser.add_argument("--eval_only", action="store_true")
     parser.add_argument("--dump_errs", action="store_true")
     parser.add_argument("--dump_file", type=str, default="")
     parser.add_argument("--vec_dim", type=int, default=512)

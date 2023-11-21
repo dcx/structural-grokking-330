@@ -8,7 +8,9 @@ dependencies:
   - tensorboard
   - hypothesis==6.88.1
   - lark==1.1.7
-  - matplotlib==3.8.0
+  - matplotlib
+  - pandas
+  - streamlit
   - numpy
   - Pillow
   - scipy==1.11.3
@@ -18,3 +20,6 @@ dependencies:
   - pytorch::pytorch
   - scikit-learn
   - seaborn
+  - pip
+  - pip:
+    - bertviz
