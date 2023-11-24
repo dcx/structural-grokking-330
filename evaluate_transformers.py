@@ -164,7 +164,7 @@ def evaluate_network(args, interface, test_dataset, device="cpu", tokenizer=None
         print(f"Evaluating on dataset: {args.dataset}")
 
         dataloader = prepare_dataset(test_dataset)
-
+ 
         eval_dataset(interface, tokenizer, dataloader, device)
 
     # Generate and save confusion matrix if specified

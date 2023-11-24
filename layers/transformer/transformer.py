@@ -108,7 +108,6 @@ class TransformerDecoderLayerPreLN(torch.nn.Module):
         full_target: Optional[torch.Tensor] = None,
         pos_offset: int = 0,
     ) -> torch.Tensor:
-
         assert pos_offset == 0 or tgt_mask is None
         tgt = self.norm1(tgt)
         tgt2 = self.self_attn(
@@ -175,7 +174,6 @@ class TransformerDecoderLayer(torch.nn.Module):
         full_target: Optional[torch.Tensor] = None,
         pos_offset: int = 0,
     ) -> torch.Tensor:
-
         assert pos_offset == 0 or tgt_mask is None
         tgt2 = self.self_attn(
             tgt,
@@ -280,7 +278,6 @@ class TransformerEncoder(torch.nn.Module):
         return attn_matrices
 
     def forward(self, data: torch.Tensor, *args, **kwargs):
-
         if "src_length_mask" in kwargs:
             mask = kwargs["src_length_mask"]
         elif len(args) > 0:

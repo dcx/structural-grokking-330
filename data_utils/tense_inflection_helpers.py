@@ -168,7 +168,7 @@ def build_datasets_tense_inflection():
     return dataset, in_vocab, in_sentences
 
 
-def eval_callback_tense_inflection(lm, in_vocab, split):
+def eval_callback_tense_inflection(lm, in_vocab, split, device='cpu'):
     def tokenizer(s):
         return [lm.encoder_sos] + in_vocab(s)
 
@@ -194,7 +194,7 @@ def eval_callback_tense_inflection(lm, in_vocab, split):
         input_sents.append(" ".join(sent_words[: idx + 1]))
         target_sents.append(" ".join(sent_words[idx + 1 :]))
 
-    out = run_lm_decoding(tokenizer, lm, input_sents, 0)
+    out = run_lm_decoding(tokenizer, lm, input_sents, device=device)
 
     main_correct = 0.0
     for target_sent, our_pred in zip(target_sents, out):

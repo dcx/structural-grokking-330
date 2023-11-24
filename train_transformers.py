@@ -171,7 +171,7 @@ def get_datasets_and_vocab(args, language_model: bool):
     return datasets, in_vocab
 
 
-def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
+def get_callback_fn(args, language_model: bool, model, in_vocab, datasets, device='cpu'):
     """
     Returns the appropriate callback function based on the dataset type specified in args.
 
@@ -190,10 +190,10 @@ def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
 
     dataset_callbacks = {
         "lm": lambda split: eval_lm_callback(model, in_vocab, split),
-        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
-        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
+        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split, device=device),
+        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split, device=device),
+        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval, device=device) \
+            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval, device=device)
     }
 
     return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
@@ -213,33 +213,6 @@ def main_lm(args):
 
     return datasets, in_vocab
 
-
-def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
-    """
-    Returns the appropriate callback function based on the dataset type specified in args.
-
-    Args:
-        args: Command line arguments.
-        language_model (bool): Flag to determine if it's a language model.
-        model: The trained model.
-        in_vocab (CharVocabulary): Input vocabulary.
-        datasets: The datasets used for training and evaluation.
-
-    Returns:
-        function: The corresponding callback function.
-    """
-    if not args.callback:
-        return None
-
-    dataset_callbacks = {
-        "lm": lambda split: eval_lm_callback(model, in_vocab, split),
-        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
-        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
-    }
-
-    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
 
 def get_regularizer(args, in_vocab):
     """
@@ -281,7 +254,7 @@ def main_lm(args):
             args, in_vocab, out_vocab, model_load_path=args.model_load_path)
 
     callback_fn = get_callback_fn(
-        args, language_model, model, in_vocab, datasets)
+        args, language_model, model, in_vocab, datasets, device=args.device)
     
     regularizer = get_regularizer(args, in_vocab)
 
