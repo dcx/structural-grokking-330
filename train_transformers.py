@@ -164,6 +164,7 @@ def get_datasets_and_vocab(args, language_model: bool):
             hold_out_p_subtrees=args.dsam_hold_out_p_subtrees,
             max_held_examples=args.dsam_max_held_examples,
             use_intermediates=args.lm_with_token_labels,
+            balance_depths=args.dsam_balance_depths,
             lm_mode=language_model)
     else:
         datasets, in_vocab = build_datasets_lm()
@@ -390,6 +391,7 @@ if __name__ == "__main__":
     parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
     parser.add_argument("--dsam_hold_out_p_subtrees", type=float, default=0.0, help="Hold out examples which match this proportion of unique subtrees and use them as the test set.")
     parser.add_argument("--dsam_max_held_examples", type=int, default=None, help="If specified, randomly cut held out set down to this many examples. Useful when holding out subtrees with a lot of data.")
+    parser.add_argument("--dsam_balance_depths", action="store_true")
 
     args = parser.parse_args()
 

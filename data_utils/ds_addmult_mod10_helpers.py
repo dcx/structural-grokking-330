@@ -24,6 +24,7 @@ def build_dataset_addmult_mod10(
     max_held_examples: int = None,
     lm_mode: bool = False,
     use_intermediates: bool = False,
+    balance_depths: bool = False,
 ) -> Tuple[DatasetDict, CharVocabulary]:
     """
     Build an addmult mod10 dataset with specific constraints and tokenize the examples.
@@ -59,6 +60,23 @@ def build_dataset_addmult_mod10(
     dataset = dataset.filter(lambda example: example['height'] <= max_tree_height and example['height'] >= min_tree_height)
     # max width 80
     dataset = dataset.filter(lambda example: example['width'] <= max_tree_width)
+
+    # Balance depths
+    if balance_depths:
+        datasets_by_depth = {}
+        for i in range(min_tree_height, max_tree_height + 1):
+            datasets_by_depth[i] = dataset.filter(lambda example: example['height'] == i)
+
+        min_depth = min([len(datasets_by_depth[i]) for i in range(min_tree_height, max_tree_height + 1)])
+        print(f"Balancing depths. Min examples in any depth: {min_depth}")
+
+        # sample min_depth examples from each depth
+        for i in range(min_tree_height, max_tree_height + 1):
+            datasets_by_depth[i] = datasets_by_depth[i].select(range(min_depth))
+
+        # concatenate all the datasets
+        dataset = concatenate_datasets([datasets_by_depth[i] for i in range(min_tree_height, max_tree_height + 1)])
+        print(f"Total examples after balancing depths: {len(dataset)}")
 
     # Held out elements: Use as test set if provided
     dataset_held = None
