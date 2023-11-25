@@ -74,6 +74,7 @@ def get_all_hidden_states(
     end_relax_layer=0,
     tqdm_disable=False,
     pre_tokenized=None,
+    spaces=True
 ):
     def relax_cond(mask, relax_mask, num_layers):
         if input_masks is None:
@@ -142,7 +143,7 @@ def get_all_hidden_states(
         return hidden_states_all
     else:
         return get_word_vecs_from_subwords(
-            input_list, hidden_states_all, tokenizer, pre_tokenized
+            input_list, hidden_states_all, tokenizer, pre_tokenized, spaces=spaces
         )
 
 
@@ -157,7 +158,9 @@ def get_all_hidden_states_scratch(
     start_relax_layer=0,
     layer_id=-1,
     is_lm=False,
-    compute_grad=False
+    compute_grad=False,
+    spaces=True,
+    diff=False
 ):
     def relax_cond(mask, relax_mask, num_layers):
         ### relax mask only masks padded stuff
@@ -226,9 +229,15 @@ def get_all_hidden_states_scratch(
                     # the first thing is the [CLS] or [start id] which we ignore
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
                     if is_lm:
-                        hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
+                        if (diff):
+                            hidden_states = [hs[-1, :].squeeze() for hs in hidden_states]
+                        else:
+                            hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
                     else:
-                        hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
+                        if (diff):
+                            hidden_states = [hs[-2, :].squeeze() for hs in hidden_states]
+                        else:
+                            hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
                 hidden_states_all.append(hidden_states)
             progress_bar.update(en - st)
             st = en
@@ -237,7 +246,7 @@ def get_all_hidden_states_scratch(
         return hidden_states_all
     else:
         return get_word_vecs_from_subwords(
-            input_list, hidden_states_all, tokenizer, pre_tokenized
+            input_list, hidden_states_all, tokenizer, pre_tokenized, spaces=spaces
         )
 
 
@@ -265,7 +274,7 @@ def get_idxs(phrase_tokens, sent_tokens, st):
 
 
 def get_word_vecs_from_subwords(
-    input_list, hidden_states_all, tokenizer, pre_tokenized=None
+    input_list, hidden_states_all, tokenizer, pre_tokenized=None, spaces=True
 ):
     cumulants = []
     if pre_tokenized:
@@ -279,7 +288,10 @@ def get_word_vecs_from_subwords(
         if pre_tokenized:
             idxs = word_tokens_all[idx]
         else:
-            words = input_str.split(" ")
+            if (spaces):
+                words = input_str.split(" ")
+            else:
+                words = [str(_) for _ in input_str]
             idxs = []
             # go in order.
             st = 0
@@ -467,11 +479,14 @@ def tree_projection(
         return chart_values, parse, score
 
 
-def get_pre_tokenized_info(input_str, tokenizer, is_roberta=False):
+def get_pre_tokenized_info(input_str, tokenizer, is_roberta=False, spaces=True):
     sent_tokens = tokenizer(input_str)
     if is_roberta:
         sent_tokens = sent_tokens["input_ids"]
-    words = input_str.split(" ")
+    if (spaces):
+        words = input_str.split(" ")
+    else:
+        words = [str(_) for _ in input_str]
     idxs = []
     # go in order.
     st = 0
@@ -525,8 +540,6 @@ def get_tree_projection(
         layer_id=layer_id,
         is_lm=is_lm,
     )
-    # print(masked_strs)
-    # print(input_masks)
     keys = sentence2idx_tuple[0]
 
     if sim_fn == "euclidean":

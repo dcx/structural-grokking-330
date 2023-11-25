@@ -212,6 +212,7 @@ def train_loop(
     regularizer_rel_wt = args.regularizer_rel_wt
     regularize_all = args.regularize_all
     compute_dot = args.compute_grad_dot
+    use_gold = args.use_gold
 
     opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
@@ -261,13 +262,13 @@ def train_loop(
                 if num_steps % regularizer_steps == 0:
                     if (regularizer is not None):
                         if (regularize_all):
-                            sci_charts = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                            sci_charts, samples = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
                         else:
-                            sci_charts = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                            sci_charts, samples = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
                         if (args.mean_regularize):
-                            sci_scores = regularizer.get_score(sci_charts, mean=True)
+                            sci_scores = regularizer.get_score(sci_charts, mean=True, input_str=samples, use_gold=use_gold)
                         else:
-                            sci_scores = regularizer.get_score(sci_charts, mean=False)
+                            sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold)
                         # print(sci_scores)
                         fin_sci_score = torch.mean(torch.stack(sci_scores))
                         sci_loss = -regularizer_rel_wt * fin_sci_score

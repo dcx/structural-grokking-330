@@ -254,12 +254,12 @@ def get_regularizer(args, in_vocab):
     if (args.distance_fn == "cosine"):
         dist_fn = lambda x1, x2: F.cosine_similarity(x1, x2, dim=-1)
     else:
-        dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
+        dist_fn = lambda x1, x2: -torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
     if (args.regularize):
         if args.dataset == "ds-addmult-mod10":
-            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single)
+            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference)
         else:
-            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single)
+            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference)
     else:
         regularizer = None
     return regularizer
@@ -367,7 +367,9 @@ if __name__ == "__main__":
     parser.add_argument("--reg_sample_num", type=int, default=-1, help="Number of phrases sampled for regularization")
     parser.add_argument("--reg_sample_len", type=int, default=10, help="Length of phrases sampled for regularization")
     parser.add_argument("--reg_depth_limit", type=int, default=-1, help="Depth limited SCI computation")
-    parser.add_argument("--reg_single", action="store_true")
+    parser.add_argument("--reg_single", action="store_true", help="Only top level decision for SCI")
+    parser.add_argument("--use_gold", action="store_true", help="Enforce LR parsing for addmult")
+    parser.add_argument("--use_difference", action="store_true", help="Use difference to compute vectors in SCI score")
 
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--batch_size_eval", type=int, default=8)

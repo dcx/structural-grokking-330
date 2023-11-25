@@ -110,7 +110,7 @@ def compute_attention_sparsity(args, model_name):
     else:
         raise Exception
 
-    lm, _ = get_base_transformer_lm(args, in_vocab, model_name=model_name)
+    lm, _ = get_base_transformer_lm(args, in_vocab, model_load_path=model_name)
     device = torch.device("cuda:{}".format(args.gpu_id))
     lm.to(device)
 
@@ -161,7 +161,7 @@ def compute_model_norm(args, model_name):
 def compute_sci_helper_fn(
     args, in_vocab, model_name, in_sentences, targets, gold_parses, ret_vals
 ):
-    lm, _ = get_base_transformer_lm(args, in_vocab, model_name=model_name)
+    lm, _ = get_base_transformer_lm(args, in_vocab, model_load_path=model_name)
     device = torch.device("cuda:{}".format(args.gpu_id))
     lm.to(device)
 
@@ -172,8 +172,8 @@ def compute_sci_helper_fn(
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
-    if os.path.exists("{}/{}.txt".format(folder_name, checkpoint)) and not ret_vals:
-        return
+    # if os.path.exists("{}/{}.txt".format(folder_name, checkpoint)) and not ret_vals:
+    #     return
 
     def tokenizer(s, add_special_tokens=True):
         if add_special_tokens:
@@ -212,6 +212,9 @@ def compute_sci_helper_fn(
     else:
         parsing_acc = 0.0
 
+    print(score)
+    print(parsing_acc)
+
     if ret_vals:
         return score, pred_parses, gold_parses
     else:
@@ -224,6 +227,7 @@ def compute_sci_helper_fn(
 
 
 def compute_sci(args, model_name, ret_vals=False):
+
     args.vec_dim = 512
     args.n_heads = 4
     args.gpu_id = 0
@@ -295,6 +299,7 @@ if __name__ == "__main__":
     parser.add_argument("--resolution", type=int, default=-1)
     parser.add_argument("--compute_norm", action="store_true")
     parser.add_argument("--compute_sparsity", action="store_true")
+    parser.add_argument("--lm_with_token_labels", action="store_true")
     args = parser.parse_args()
     # main(args)
     # eval2(args)
