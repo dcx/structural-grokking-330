@@ -4,19 +4,16 @@ import numpy as np
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
-
-from vocabulary import CharVocabulary
-
-import layers
-
-from transformers.data.data_collator import DataCollatorWithPadding
-
 from datasets import DatasetDict
-
-
 from torch.utils.data import DataLoader
 
+
+import layers
 import collate
+from vocabulary import CharVocabulary
+from transformers.data.data_collator import DataCollatorWithPadding
+from util import test_continuations
+from train_transformers import get_base_transformer_lm, get_datasets_and_vocab
 
 
 def package_data(input_text, tokenizer, device="cpu"):
@@ -33,11 +30,7 @@ def package_data(input_text, tokenizer, device="cpu"):
     ]
 
     collator = collate.VarLengthCollate(None)
-    train_dataloader = DataLoader(
-        data,
-        collate_fn=collator,
-        batch_size=16
-    )
+    train_dataloader = DataLoader(data, collate_fn=collator, batch_size=16)
     data_dict = list(train_dataloader)[0]
     # Send to device
     out = {k: v.to(device=device, non_blocking=True) for k, v in data_dict.items()}
@@ -53,6 +46,7 @@ def prepare_dataset(dataset, batch_size=16):
         batch_size=batch_size,
         collate_fn=collator,
     )
+
     return train_dataloader
 
 
@@ -138,6 +132,17 @@ def generate_confusion_matrix(model, tokenizer, dataset, device):
     plt.show()
 
 
+def get_model_attn_matrix(model, data_tensor):
+    src = data_tensor["in"].T
+    src_len = data_tensor["in_len"]
+
+    mask = model.generate_len_mask(src.shape[1], src_len)
+    src = model.pos_embed(model.input_embed(src), 0)
+    attn_matrices = model.trafo.get_attn_matrices(src, tgt=None, src_length_mask=mask)
+    attention_matrices = tuple([i for i in attn_matrices])
+    return attention_matrices
+
+
 def evaluate_network(args, interface, test_dataset, device="cpu", tokenizer=None):
     interface.model.eval()
 
@@ -164,10 +169,92 @@ def evaluate_network(args, interface, test_dataset, device="cpu", tokenizer=None
         print(f"Evaluating on dataset: {args.dataset}")
 
         dataloader = prepare_dataset(test_dataset)
- 
+
         eval_dataset(interface, tokenizer, dataloader, device)
 
     # Generate and save confusion matrix if specified
     if args.eval_confusion_matrix:
         print("Generating confusion matrix.")
         generate_confusion_matrix(interface.model, tokenizer, dataset, device)
+
+
+class LMEvaluator:
+    # Init function to take get_base_transformer_lm args as input
+    def __init__(
+        self,
+        in_vocab,
+        out_vocab,
+        vec_dim,
+        n_heads,
+        encoder_n_layers,
+        model_load_path=None,
+    ):
+        assert model_load_path, (
+            "Must input load path in order to evaluate model,"
+            "otherwise weights will be randomized"
+        )
+        model, interface = get_base_transformer_lm(
+            in_vocab,
+            vec_dim,
+            n_heads,
+            encoder_n_layers,
+            model_load_path=model_load_path,
+        )
+
+        self.model = model
+        self.interface = interface
+        self.in_vocab = in_vocab
+        self.out_vocab = out_vocab
+
+    def get_lm_output(self, in_sentence, device="cpu"):
+        def tokenizer(s):
+            return [self.model.encoder_sos] + self.in_vocab(s)
+
+        query = in_sentence + "="
+
+        out = test_continuations(
+            tokenizer, self.model, [query], gpu_id=0, batch_size=1, device=device
+        )
+
+        out_vocab = sorted(list(self.out_vocab.state_dict()["chars"]))
+
+        desired_out_idx = [self.in_vocab(w) for w in out_vocab]
+        out = out[:, desired_out_idx]
+        decoded = out.argmax(dim=1)
+
+        result = out_vocab[decoded[0]]
+
+        return result
+
+
+def get_vocab(dataset_type):
+    if dataset_type == "ds-addmult-mod10":
+        in_vocab = CharVocabulary(chars=set("0123456789+*()="))
+        out_vocab = CharVocabulary(chars=set("0123456789"))
+    elif dataset_type == "let":
+        raise NotImplementedError("dataset_type 'let' not implemented yet")
+
+    return in_vocab, out_vocab
+
+
+if __name__ == "__main__":
+    vec_dim = 512
+    n_heads = 4
+    encoder_n_layers = 6
+    model_load_path = "saved_models/transformers-addmult-mod10-lm-231019/state_10000.pt"
+    dataset_type = "ds-addmult-mod10"
+    in_vocab, out_vocab = get_vocab(dataset_type)
+
+    eval_string = "(*(*44)(*44))"
+    eval_answer = 6
+
+    evaluator = LMEvaluator(
+        in_vocab,
+        out_vocab,
+        vec_dim,
+        n_heads,
+        encoder_n_layers,
+        model_load_path=model_load_path,
+    )
+
+    result = evaluator.get_lm_output(eval_string)
