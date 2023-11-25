@@ -211,11 +211,9 @@ class LMEvaluator:
             return [self.model.encoder_sos] + self.in_vocab(s)
 
         query = in_sentence + "="
-
         out = test_continuations(
             tokenizer, self.model, [query], gpu_id=0, batch_size=1, device=device
         )
-
         out_vocab = sorted(list(self.out_vocab.state_dict()["chars"]))
 
         desired_out_idx = [self.in_vocab(w) for w in out_vocab]

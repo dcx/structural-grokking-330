@@ -46,7 +46,7 @@ def main():
         "Select Dataset Type", ["ds-addmult-mod10", "let"]
     )
 
-    input_sentence = st.text_input("Input Sentence", "(+(+4(*32))(*45))")
+    input_sentence = st.text_input("Input Sentence", "(+5(*32))")
 
     if dataset_type == "let":
         st.warning("The 'let' dataset is not available yet.")
@@ -54,8 +54,8 @@ def main():
     else:
         run_button_key = "run_button"
 
-    # if st.button("Run model", key=run_button_key):
-    if True:
+    if st.button("Run model", key=run_button_key):
+        # if True:
         MODEL_LOAD_PATH = os.path.join(model_folder, model_file)
         tokens = list(input_sentence)
 
@@ -71,13 +71,23 @@ def main():
         )
 
         model_out = evaluator.get_lm_output(input_sentence)
-        attn_matrices = get_model_attn_matrix(evaluator.model, input_sentence)
+        data_tensor = package_data([input_sentence], in_vocab)
+        attn_matrices = get_model_attn_matrix(evaluator.model, data_tensor)
         model_view_html = model_view(attn_matrices, tokens, html_action="return")
+
+        head_view_html = head_view(attn_matrices, tokens, html_action="return")
 
         calculated = evaluate_single_expression(input_sentence)
         print(f"LARK calculated answer: {calculated}")
+
+        st.subheader("Answer", divider="grey")
+        st.text(f"LARK calculated answer: {calculated}")
         st.text(f"Model answer: {model_out}")
 
+        st.subheader("Head Attention", divider="grey")
+        html(head_view_html.data, width=1000, height=500, scrolling=True)
+
+        st.subheader("Model Attention", divider="grey")
         html(
             model_view_html.data,
             width=50 + (2 * n_heads * 1400),
