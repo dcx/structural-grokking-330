@@ -15,7 +15,8 @@ from random import randint
 from time import time
 
 class Chart():
-    def __init__(self, sim_metric, tokenizer, spaces, hinge_const, dataset, sample_num = -1, sample_len = 8, depth_limit=-1, single = False, diff = False):
+    def __init__(self, sim_metric, tokenizer, spaces, hinge_const, dataset, 
+                 sample_num = -1, sample_len = 8, depth_limit=-1, single = False, diff = False, gumbel = False):
         # Initialize the SCI chart
         self.sim_metric = sim_metric
 
@@ -26,6 +27,7 @@ class Chart():
         self.hinge_const = hinge_const
         self.dataset = dataset
         self.diff = diff
+        self.gumbel = gumbel
 
         # phrase sampler version of regularizer: sample small phrases from the input and calculate
         self.sample_num = sample_num
@@ -243,7 +245,8 @@ class Chart():
                         layer_id=-1,
                         is_lm=True,
                         compute_grad=True,
-                        diff=self.diff
+                        diff=self.diff,
+                        slice_dict=slice_dict
                     )
 
         if (not batch and self.sample_num == -1):
@@ -252,7 +255,10 @@ class Chart():
                 st, en = key
 
                 if (self.diff):
-                    fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st]
+                    if (st == 0):
+                        fully_contextual_vectors = all_vector_idxs[en]
+                    else:
+                        fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st-1]
                     fully_contextual_vectors = fully_contextual_vectors.squeeze()
                 else:
                     fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
@@ -399,6 +405,11 @@ class Chart():
                         k_rand = randint(0, end-1)
                         norm_score = chart[(0, end_brack)] + chart[(end_brack + 1, end)] - chart[(0,k_rand)] - chart[(k_rand+1,end)]
                 else:
+                    if (len(curr_str) <= 1):
+                        # depth 1 subexpression, don't really need to enforce
+                        score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)
+                        scores.append(score.float())
+                        continue
                     best_score = -100
                     tot_score = 0
                     for k in range(0, end):

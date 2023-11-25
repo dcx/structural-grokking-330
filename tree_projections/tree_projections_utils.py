@@ -160,7 +160,8 @@ def get_all_hidden_states_scratch(
     is_lm=False,
     compute_grad=False,
     spaces=True,
-    diff=False
+    diff=False,
+    slice_dict=None
 ):
     def relax_cond(mask, relax_mask, num_layers):
         ### relax mask only masks padded stuff
@@ -175,6 +176,12 @@ def get_all_hidden_states_scratch(
     hidden_states_all = []
     batch_size = 256
     st = 0
+
+    if(diff):
+        # Flatten slice dict
+        list_slice_dict = []
+        for list_slice in slice_dict:
+            list_slice_dict += list_slice
 
     train_data_collator = collate.VarLengthCollate(None)
 
@@ -192,6 +199,8 @@ def get_all_hidden_states_scratch(
         while st < len(input_list):
             en = min(len(input_list), st + batch_size)
             cslice = input_list[st:en]
+            if (diff):
+                cslice_dict = list_slice_dict[st:en]
             inputs, input_lens = tokenizer_helper(cslice)
             inputs = inputs.to(device)
             input_lens = input_lens.to(device)
@@ -230,12 +239,12 @@ def get_all_hidden_states_scratch(
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
                     if is_lm:
                         if (diff):
-                            hidden_states = [hs[-1, :].squeeze() for hs in hidden_states]
+                            hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                         else:
                             hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
                     else:
                         if (diff):
-                            hidden_states = [hs[-2, :].squeeze() for hs in hidden_states]
+                            hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                         else:
                             hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
                 hidden_states_all.append(hidden_states)
@@ -459,6 +468,7 @@ def tree_projection(
                     if curr_val > best_val:
                         best_val = curr_val
                         curr_split = k
+            print(word_list[st:curr_split+1], word_list[curr_split+1:en])
             p1, s1 = tree_projection_recurse(word_list, st, curr_split)
             p2, s2 = tree_projection_recurse(word_list, curr_split + 1, en)
             if normalize:
