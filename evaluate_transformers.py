@@ -225,6 +225,32 @@ class LMEvaluator:
         return result
 
 
+class ClassifierEvaluator:
+    def __init__(self, model, tokenizer, device="cpu"):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.device = device
+
+    def get_classifier_output(self, input_text):
+        # Tokenize the input text
+        tokenized_input = self.tokenizer(input_text)
+
+        # Convert to a PyTorch tensor and add a batch dimension
+        input_tensor = torch.tensor([tokenized_input], device=self.device)
+
+        # Run the model
+        with torch.no_grad():
+            output = self.model(input_tensor)
+
+        # Assuming the output is logits, apply softmax to get probabilities
+        probabilities = torch.softmax(output, dim=1)
+
+        # Get the class with the highest probability
+        predicted_class = torch.argmax(probabilities, dim=1).item()
+
+        return predicted_class
+
+
 def get_vocab(dataset_type):
     if dataset_type == "ds-addmult-mod10":
         in_vocab = CharVocabulary(chars=set("0123456789+*()="))
