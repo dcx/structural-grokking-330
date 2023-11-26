@@ -2,6 +2,7 @@ name: minimal_env
 channels:
   - conda-forge
   - pytorch
+  - nvidia
 dependencies:
   - python==3.9
   - datasets==2.14.5
@@ -18,6 +19,7 @@ dependencies:
   - transformers
   - wandb
   - pytorch::pytorch
+  - pytorch-cuda==11.7
   - scikit-learn
   - seaborn
   - pip
