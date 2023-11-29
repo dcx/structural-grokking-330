@@ -70,7 +70,7 @@ def main():
             model_load_path=MODEL_LOAD_PATH,
         )
 
-        model_out = evaluator.get_lm_output(input_sentence)
+        model_out = evaluator.get_output(input_sentence)
         data_tensor = package_data([input_sentence], in_vocab)
         attn_matrices = get_model_attn_matrix(evaluator.model, data_tensor)
         model_view_html = model_view(attn_matrices, tokens, html_action="return")

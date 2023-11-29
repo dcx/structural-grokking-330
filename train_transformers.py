@@ -483,6 +483,6 @@ if __name__ == "__main__":
     validate_args(args)
 
     # Main program
-    init_wandb(args)
+    init_wandb(args) 
     set_seed(args)
     main_lm(args)

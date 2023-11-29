@@ -1,3 +1,5 @@
+from typing import Protocol
+
 import torch
 import pandas as pd
 import numpy as np
@@ -13,7 +15,11 @@ import collate
 from vocabulary import CharVocabulary
 from transformers.data.data_collator import DataCollatorWithPadding
 from util import test_continuations
-from train_transformers import get_base_transformer_lm, get_datasets_and_vocab
+from train_transformers import (
+    get_base_transformer_lm,
+    get_datasets_and_vocab,
+    get_base_transformer_model,
+)
 
 
 def package_data(input_text, tokenizer, device="cpu"):
@@ -178,6 +184,14 @@ def evaluate_network(args, interface, test_dataset, device="cpu", tokenizer=None
         generate_confusion_matrix(interface.model, tokenizer, dataset, device)
 
 
+class Evaluator(Protocol):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def get_output():
+        pass
+
+
 class LMEvaluator:
     # Init function to take get_base_transformer_lm args as input
     def __init__(
@@ -206,7 +220,7 @@ class LMEvaluator:
         self.in_vocab = in_vocab
         self.out_vocab = out_vocab
 
-    def get_lm_output(self, in_sentence, device="cpu"):
+    def get_output(self, in_sentence, device="cpu"):
         def tokenizer(s):
             return [self.model.encoder_sos] + self.in_vocab(s)
 
@@ -226,12 +240,42 @@ class LMEvaluator:
 
 
 class ClassifierEvaluator:
-    def __init__(self, model, tokenizer, device="cpu"):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.device = device
+    def __init__(
+        self,
+        in_vocab,
+        out_vocab,
+        vec_dim,
+        n_heads,
+        encoder_n_layers,
+        decoder_n_layers=0,
+        mode="classification",
+        relative=False,
+        is_null_encoder=False,
+        model_load_path=None,
+    ):
+        assert model_load_path, (
+            "Must input load path in order to evaluate model,"
+            "otherwise weights will be randomized"
+        )
+        model, interface = get_base_transformer_model(
+            in_vocab,
+            out_vocab,
+            vec_dim,
+            n_heads,
+            encoder_n_layers,
+            decoder_n_layers,
+            mode=mode,
+            relative=relative,
+            is_null_encoder=is_null_encoder,
+            model_load_path=model_load_path,
+        )
 
-    def get_classifier_output(self, input_text):
+        self.model = model
+        self.interface = interface
+        self.in_vocab = in_vocab
+        self.out_vocab = out_vocab
+
+    def get_output(self, input_text):
         # Tokenize the input text
         tokenized_input = self.tokenizer(input_text)
 
@@ -281,4 +325,4 @@ if __name__ == "__main__":
         model_load_path=model_load_path,
     )
 
-    result = evaluator.get_lm_output(eval_string)
+    result = evaluator.get_output(eval_string)
