@@ -213,15 +213,19 @@ def train_loop(
     regularize_all = args.regularize_all
     compute_dot = args.compute_grad_dot
     use_gold = args.use_gold
+    tau_init = args.tau_init
+    tau_final = args.tau_final
+    use_linear = args.use_linear
 
     opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
-
 
     if tokenizer is not None:
         train_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     else:
         train_data_collator = collate.VarLengthCollate(tokenizer)
+
+    tau_step = (tau_final - tau_init)/max_steps
 
     best_ppl = {key: 10000.0 for key in val_datasets}
     sci_grads = None
@@ -260,18 +264,23 @@ def train_loop(
 
                 # Tree regularizer!
                 if num_steps % regularizer_steps == 0:
+                    tau = tau_init + tau_step * num_steps
                     if (regularizer is not None):
                         if (regularize_all):
                             sci_charts, samples = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
                         else:
                             sci_charts, samples = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
                         if (args.mean_regularize):
-                            sci_scores = regularizer.get_score(sci_charts, mean=True, input_str=samples, use_gold=use_gold)
+                            sci_scores = regularizer.get_score(sci_charts, mean=True, input_str=samples, use_gold=use_gold, tau=tau)
                         else:
-                            sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold)
+                            sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold, tau=tau)
                         # print(sci_scores)
-                        fin_sci_score = torch.mean(torch.stack(sci_scores))
-                        sci_loss = -regularizer_rel_wt * fin_sci_score
+                        if (use_linear):
+                            fin_sci_score = torch.mean(torch.stack([torch.abs(_) for _ in sci_scores]))
+                            sci_loss = regularizer_rel_wt * fin_sci_score
+                        else:
+                            fin_sci_score = torch.mean(torch.stack(sci_scores))
+                            sci_loss = -regularizer_rel_wt * fin_sci_score
                         sci_loss.backward()
                         if compute_dot:
                             parameters = [
@@ -419,3 +428,67 @@ def train_loop(
 
     print("Best Perplexities,", best_ppl)
     return
+
+def reg_loop(
+    args,
+    model,
+    train_dataset,
+    device,
+    tokenizer=None,
+    regularizer=None
+):
+    num_steps = 0
+    train_batch_size = args.batch_size
+    use_gold = args.use_gold
+    max_steps = args.max_train_steps
+
+    if tokenizer is not None:
+        train_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    else:
+        train_data_collator = collate.VarLengthCollate(tokenizer)
+
+    all_sci_scores = []
+
+    while True:
+        # print(train_dataset)
+        train_dataloader = DataLoader(
+            train_dataset,
+            sampler=RandomSampler(train_dataset),
+            batch_size=train_batch_size,
+            collate_fn=train_data_collator,
+        )
+        total_train_sz = len(train_dataset)
+        if num_steps > max_steps:
+            break
+        with torch.enable_grad(), tqdm(total=total_train_sz) as progress_bar:
+            for curr_batch_dict in train_dataloader:
+                num_steps += 1
+                if num_steps > max_steps:
+                    break
+                if type(model) != torch.nn.Module:
+                    model.model.train()
+                else:
+                    model.train()
+                curr_batch_dict_gpu = {}
+                for key in curr_batch_dict:
+                    if (key == 'string'):
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key]
+                    else:
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key].to(device)
+                progress_bar.update(curr_batch_dict["in"].shape[1])
+
+                # Tree regularizer!
+                if (regularizer is not None):
+                    sci_charts, samples = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
+                    if (args.mean_regularize):
+                        sci_scores = regularizer.get_score(sci_charts, mean=True, input_str=samples, use_gold=use_gold, print_parse=False)
+                    else:
+                        sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold, print_parse=False)
+                    # print(sci_scores)
+                    fin_sci_score = torch.mean(torch.stack(sci_scores))
+                    all_sci_scores.append(fin_sci_score.item())
+                    print(fin_sci_score)
+    print(all_sci_scores)
+    print(sum(all_sci_scores)/len(all_sci_scores))
+
+        

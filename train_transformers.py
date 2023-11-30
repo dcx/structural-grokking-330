@@ -20,7 +20,7 @@ from data_utils.ds_addmult_mod10_helpers import (
     eval_callback_mod10_lm
 )
 from transformer_helpers import create_model, create_lm, create_model_interface
-from training_utils import train_loop
+from training_utils import train_loop, reg_loop
 from regularizer_new import Chart
 
 WANDB_USERS = {
@@ -258,9 +258,13 @@ def get_regularizer(args, in_vocab):
         dist_fn = lambda x1, x2: -torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
     if (args.regularize):
         if args.dataset == "ds-addmult-mod10":
-            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference, gumbel=args.use_gumbel)
+            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const, 
+                                dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, 
+                                depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference, gumbel=args.use_gumbel, linear=args.use_linear)
         else:
-            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference, gumbel=args.use_gumbel)
+            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, 
+                                sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference, 
+                                gumbel=args.use_gumbel, linear=args.use_linear)
     else:
         regularizer = None
     return regularizer
@@ -300,6 +304,14 @@ def main_lm(args):
 
     if args.eval_only:
         raise ValueError("Testing functionality not implemented yet!")
+    elif args.reg_only:
+        reg_loop(
+            args,
+            interface,
+            datasets["train"],
+            device,
+            regularizer = regularizer
+        )
     else:
         train_loop(
             args,
@@ -342,6 +354,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
     parser.add_argument("--eval_only", action="store_true")
+    parser.add_argument("--reg_only", action="store_true", help="Just calculate the parses, quick fix")
     parser.add_argument("--dump_errs", action="store_true")
     parser.add_argument("--dump_file", type=str, default="")
     parser.add_argument("--vec_dim", type=int, default=512)
@@ -371,8 +384,10 @@ if __name__ == "__main__":
     parser.add_argument("--reg_single", action="store_true", help="Only top level decision for SCI")
     parser.add_argument("--use_gold", action="store_true", help="Enforce LR parsing for addmult")
     parser.add_argument("--use_difference", action="store_true", help="Use difference to compute vectors in SCI score")
-    # Not implemented yet, don't turn this on
     parser.add_argument("--use_gumbel", action="store_true", help="Use gumbel softmax to encourage exploration")
+    parser.add_argument("--tau_init", type=float, default=1.0, help="Initial Temperature for gumbel/annealing")
+    parser.add_argument("--tau_final", type=float, default=0.1, help="Final temperature for gumbel/annealing")
+    parser.add_argument("--use_linear", action="store_true", help="Linear pass SCI computation")
     # No T scheduling for now
 
     parser.add_argument("--batch_size", type=int, default=16)

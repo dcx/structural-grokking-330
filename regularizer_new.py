@@ -16,7 +16,7 @@ from time import time
 
 class Chart():
     def __init__(self, sim_metric, tokenizer, spaces, hinge_const, dataset, 
-                 sample_num = -1, sample_len = 8, depth_limit=-1, single = False, diff = False, gumbel = False):
+                 sample_num = -1, sample_len = 8, depth_limit=-1, single = False, diff = False, gumbel = False, linear=False):
         # Initialize the SCI chart
         self.sim_metric = sim_metric
 
@@ -35,6 +35,9 @@ class Chart():
 
         # depth limited version of regularizer: computation only for last d layers of Chart
         self.depth_limit = depth_limit
+
+        # linear pass idea
+        self.linear = linear
 
         # try out top-layer decision idea
         self.single = single
@@ -233,21 +236,22 @@ class Chart():
                 pre_tokenized_construct[1] += [batch_idxs[_]] * num_req
             pre_tokenized_construct = tuple(pre_tokenized_construct)
 
-        inner_context_vecs = get_all_hidden_states_scratch(
-                        curr_model,
-                        tokenizer_helper,
-                        masked_strs,
-                        input_masks,
-                        sum_all=True,
-                        start_relax_layer=start_relax_layer,
-                        tqdm_disable=True,
-                        pre_tokenized=pre_tokenized_construct,
-                        layer_id=-1,
-                        is_lm=True,
-                        compute_grad=True,
-                        diff=self.diff,
-                        slice_dict=slice_dict
-                    )
+            if (not self.linear):
+                inner_context_vecs = get_all_hidden_states_scratch(
+                                curr_model,
+                                tokenizer_helper,
+                                masked_strs,
+                                input_masks,
+                                sum_all=True,
+                                start_relax_layer=start_relax_layer,
+                                tqdm_disable=True,
+                                pre_tokenized=pre_tokenized_construct,
+                                layer_id=-1,
+                                is_lm=True,
+                                compute_grad=True,
+                                diff=self.diff,
+                                slice_dict=slice_dict
+                            )
 
         if (not batch and self.sample_num == -1):
             all_vector_idxs = outer_context_vecs[0][-1]
@@ -260,11 +264,22 @@ class Chart():
                     else:
                         fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st-1]
                     fully_contextual_vectors = fully_contextual_vectors.squeeze()
+                elif (self.linear):
+                    fully_contextual_vectors = all_vector_idxs[st : en + 1].mean(
+                        axis=0
+                    )
                 else:
                     fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
                         axis=0
                     )
-                inner_context_vectors = inner_context_vecs[idx][-1]
+                if (self.linear):
+                    if (st == 0):
+                        scores[key] = 0
+                        continue
+                    else:
+                        inner_context_vectors = all_vector_idxs[st]
+                else:
+                    inner_context_vectors = inner_context_vecs[idx][-1]
                 scores[key] = self.sim_metric(
                     inner_context_vectors, fully_contextual_vectors
                 )
@@ -275,20 +290,34 @@ class Chart():
                     st, en = key
 
                     if (self.diff):
-                        fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st]
+                        if (st == 0):
+                            fully_contextual_vectors = all_vector_idxs[en]
+                        else:
+                            fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st-1]
                         fully_contextual_vectors = fully_contextual_vectors.squeeze()
+                    elif (self.linear):
+                        fully_contextual_vectors = all_vector_idxs[st : en + 1].mean(
+                            axis=0
+                        )
                     else:
                         fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
                             axis=0
                         )
-                    inner_context_vectors = inner_context_vecs[idx][-1]
+                    if (self.linear):
+                        if (st == 0):
+                            scores[str_idx][key] = 0
+                            continue
+                        else:
+                            inner_context_vectors = all_vector_idxs[st]
+                    else:
+                        inner_context_vectors = inner_context_vecs[idx][-1]
                     scores[str_idx][key] = self.sim_metric(
                         inner_context_vectors, fully_contextual_vectors
                     )
 
         return scores, outer_input
 
-    def get_score(self, score_chart, mean=True, input_str=None, use_gold=False):
+    def get_score(self, score_chart, tau=1, mean=True, input_str=None, use_gold=False, print_parse=False):
 
         def recurse(score_chart, curr_str, st, en):
             if (st == en):
@@ -300,7 +329,8 @@ class Chart():
                         # single digit
                         return 0
                     curr_phrase = curr_str[st : en+1]
-                    print(curr_phrase)
+                    if (print_parse):
+                        print(curr_phrase)
                     if (len(curr_phrase) <= 5):
                         # depth 1 subexpression, don't really need to enforce
                         return 0
@@ -337,15 +367,28 @@ class Chart():
                         norm_score = chart[(st+2, st+end_brack)] + chart[(st + end_brack + 1, en-1)] - score_chart[(st+2,k_rand)] - score_chart[(k_rand+1,en-2)]
                 else:
                     # Normal computation
-                    best = -1
-                    best_score = -100
-                    tot_score = 0
+                    scores = []
                     for k in range(st, en):
                         cand_score = score_chart[(st,k)] + score_chart[(k+1,en)]
-                        tot_score += cand_score
-                        if (cand_score > best_score):
-                            best = k
-                            best_score = cand_score
+                        scores.append(cand_score)
+                    
+                    scores = torch.tensor(scores, requires_grad = True, dtype = torch.float).to(device)
+                    if (self.gumbel):
+                        softmaxed = F.gumbel_softmax(scores, tau=tau, hard=True) # can schedule tau
+                        best = (torch.argmax(softmaxed) + st).item()
+                        best_score = torch.sum(softmaxed*scores)
+                        tot_score = torch.sum(scores)
+                    else:
+                        best = (torch.argmax(scores) + st).item()
+                        best_score = torch.max(scores)
+                        tot_score = torch.sum(scores)
+
+                    if (print_parse):
+                        if (self.spaces):
+                            word_list = curr_str.split(" ")
+                            print((" ").join(word_list[st:best+1]), (" ").join(word_list[best+1:en]))
+                        else:
+                            print(curr_str[st:best+1], curr_str[best+1:en])
 
                     s1 = recurse(score_chart, curr_str, st, best)
                     s2 = recurse(score_chart, curr_str, best+1, en)
@@ -366,6 +409,8 @@ class Chart():
             end = max([key[1] for key in chart])
             # print(chart)
             curr_str = input_str[idx]
+            if (print_parse):
+                print(curr_str)
             if (self.single):
                 if use_gold:
                     # enforce LR parsing (addmult only)
@@ -410,13 +455,18 @@ class Chart():
                         score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)
                         scores.append(score.float())
                         continue
-                    best_score = -100
-                    tot_score = 0
+                    curr_scores = []
                     for k in range(0, end):
                         cand_score = chart[(0,k)] + chart[(k+1,end)]
-                        tot_score += cand_score
-                        if (cand_score > best_score):
-                            best_score = cand_score
+                        curr_scores.append(cand_score)
+                    
+                    curr_scores = torch.tensor(curr_scores, requires_grad = True, dtype = torch.float).to(device)
+                    if (self.gumbel):
+                        softmaxed = F.gumbel_softmax(curr_scores, tau=tau, hard=True) # can schedule tau
+                        best_score = torch.sum(softmaxed*scores)
+                        tot_score = torch.sum(scores)
+                    else:
+                        best_score = torch.max(curr_scores)
                     if mean:
                         norm_score = best_score - (tot_score/(end))
                     else:
