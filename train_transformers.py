@@ -328,6 +328,12 @@ def main_lm(args):
         )
 
 
+def construct_run_detail_string(args):
+    run_string = f"run_nhead_{args.n_heads}_enclayer_{args.encoder_n_layers}_vec_{args.vec_dim}_" \
+     f"dsheight_{args.dsam_max_tree_height}_dsmin_{args.dsam_min_tree_height}_regularize_{args.regularize}_gold_{args.use_gold}"
+
+    return run_string
+
 def validate_args(args):
     # Check model_load_path and eval_only conditions
     if args.model_load_path:
@@ -340,8 +346,15 @@ def validate_args(args):
 
     # Print model checkpoint folder if saving is enabled
     if args.save_model:
+
+        base_folder = os.path.abspath(os.path.join(os.getcwd(), args.save_dir))
+        if not os.path.exists(base_folder):
+            os.mkdir(base_folder)
+
+        run_folder = construct_run_detail_string(args)
+        args.save_dir = os.path.join(base_folder, run_folder)
         print(
-            f"INFO: Saving model checkpoints in folder: '{os.path.abspath(os.path.join(os.getcwd(), args.save_dir))}'")
+            f"INFO: Saving model checkpoints in folder: '{args.save_dir}'")
 
     assert (args.lm_with_token_labels == False or args.lm == True), "If using --lm_with_token_labels, must also enable --lm"
 

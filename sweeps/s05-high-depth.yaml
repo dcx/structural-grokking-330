@@ -1,0 +1,54 @@
+
+
+program: train_transformers.py
+method: grid
+
+metric: # not required for random search
+  name: test_aux
+  goal: maximize
+
+parameters:
+  save_dir:
+    value: "/nlp/scr/mcgrathk/sweeps/231130_high_depth/"
+
+  encoder_n_layers:
+    values: [4, 5, 6, 7]
+  vec_dim:
+    value: 512
+
+  dsam_min_tree_height:
+    value: 1
+
+  dsam_max_tree_height:
+    values: [6, 7, 8, 9]
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--callback"
+  - "--dataset=ds-addmult-mod10"
+  - "--dsam_data_file=data_utils/ds_addmult_mod10_data/data-addmult-231102-1.5m.csv"
+  - "--lm=True"
+  - "--mode=lm"
+  - "--eval_every=10000"
+
+  - "--save_model=True"
+  - "--save_interval=100000"
+ 
+  # Is this necessary?
+  - "--lr=0.0001"
+  - "--weight_decay=0.16684086962884942"
+
+  - "--max_train_steps=500000"
+  - "--dsam_min_tree_height=1"
+  - "--dsam_max_tree_height=6"
+  - "--dsam_max_tree_width=80"
+  - "--dsam_hold_out_p_subtrees=0.15"
+  - "--balance_tree_depths=True"
+  - "--lm_with_token_labels=True"
+
+  - "--relative=True"
+  - "--wandb_user=kyle"
+  - "--batch_size=32"
+  - ${args}
