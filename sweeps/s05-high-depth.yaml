@@ -12,6 +12,7 @@ parameters:
     value: "/nlp/scr/mcgrathk/sweeps/231130_high_depth/"
 
   encoder_n_layers:
+    # values: [5]
     values: [4, 5, 6, 7]
   vec_dim:
     value: 512
@@ -20,7 +21,8 @@ parameters:
     value: 1
 
   dsam_max_tree_height:
-    values: [6, 7, 8, 9]
+    values: [6, 7, 8]
+
 
 command:
   - ${env}
@@ -33,19 +35,18 @@ command:
   - "--mode=lm"
   - "--eval_every=10000"
 
-  - "--save_model=True"
+  - "--save_model"
   - "--save_interval=100000"
+
+  "--seed=10"
  
-  # Is this necessary?
   - "--lr=0.0001"
   - "--weight_decay=0.16684086962884942"
 
   - "--max_train_steps=500000"
-  - "--dsam_min_tree_height=1"
-  - "--dsam_max_tree_height=6"
-  - "--dsam_max_tree_width=80"
+  - "--dsam_max_tree_width=100"
   - "--dsam_hold_out_p_subtrees=0.15"
-  - "--balance_tree_depths=True"
+  - "--dsam_balance_depths"
   - "--lm_with_token_labels=True"
 
   - "--relative=True"
