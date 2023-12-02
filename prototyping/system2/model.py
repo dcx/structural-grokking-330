@@ -26,8 +26,8 @@ class PlanTransformer(L.LightningModule):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
         self.linear = nn.Linear(d_model, ntoken)
 
-        self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=ntoken, average="micro") # default is macro (which averages over classes, not samples)
-        self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=ntoken, average="micro") # default is macro (which averages over classes, not samples)
+        self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=ntoken, ignore_index=pad_token_id)
+        self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=ntoken, ignore_index=pad_token_id)
 
         self.init_weights()
 
@@ -51,7 +51,7 @@ class PlanTransformer(L.LightningModule):
         x, y, padding_mask = batch # (bs, seq_len)
         y_hat = self(x, padding_mask=padding_mask) # (seq_len, bs, ntoken)
         ce_y_hat = torch.permute(y_hat, (1, 2, 0)) # (bs, ntoken, seq_len)
-        loss = F.cross_entropy(ce_y_hat, y, ignore_index=self.pad_token_id, )
+        loss = F.cross_entropy(ce_y_hat, y, ignore_index=self.pad_token_id)
         self.log("train_loss", loss)
 
         # accuracy

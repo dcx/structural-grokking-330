@@ -55,7 +55,8 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
                         **data, 
                         **{'step': 0, 'is_done': int(len(sequence) == 0), # no steps if no changes
                            'cur_state': ' '*len(data['example']), 'next_state': data['example'],
-                           'cur_action_aligned': ' '*len(data['example'])}
+                           'cur_action_aligned': ' '*len(data['example']), 'cur_action_res': ' ',
+                           'cur_action_tight': ' ', 'cur_action_type': ' ',}
                     }
 
                     cur_state = data['example'] # entire legible problem state: only updated with complete formal state changes
@@ -72,7 +73,13 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
                             'is_done': int(c == len(sequence)-1),
                             'cur_state': cur_state, # updated with cur_exp at each loop
                             'cur_action_aligned': ' '*len(data['example']), # default to blank
-                            'next_action_aligned': ' '*len(data['example']) # default to blank
+                            'cur_action_res': ' ', # default to blank
+                            'cur_action_tight': ' ', # default to blank
+                            'cur_action_type': ' ', # default to blank
+                            'next_action_aligned': ' '*len(data['example']), # default to blank
+                            'next_action_res': ' ', # default to blank
+                            'next_action_tight': ' ', # default to blank
+                            'next_action_type': ' ', # default to blank
                         }
 
                         # current action is based on current working state
@@ -211,7 +218,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('prototyping/system2-data/test-200k-2-6.csv', 200000, min_height=2, max_height=6, n_processes=8, stepwise=True)
+    make_data_mp('prototyping/system2-data/test-5k-6-8.csv', 5000, min_height=6, max_height=8, n_processes=8, stepwise=True)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')
