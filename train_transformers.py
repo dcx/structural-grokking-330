@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 import argparse
 import wandb
+from datasets import load_dataset
 from vocabulary import CharVocabulary
 from data_utils import (
     build_datasets_lm,
@@ -157,18 +158,31 @@ def get_datasets_and_vocab(args, language_model: bool):
     elif args.dataset == "tense":
         datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
-        datasets, in_vocab = build_dataset_addmult_mod10(
-            data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
-            max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
-            hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, 
-            hold_out_regex=args.dsam_hold_out_regex,
-            hold_out_p_subtrees=args.dsam_hold_out_p_subtrees,
-            max_held_examples=args.dsam_max_held_examples,
-            use_intermediates=args.lm_with_token_labels,
-            balance_depths=args.dsam_balance_depths,
-            lm_mode=language_model)
+        if os.path.exists(args.dsam_data_file):
+            datasets, in_vocab = build_dataset_addmult_mod10(
+                data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
+                max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
+                hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples, 
+                hold_out_regex=args.dsam_hold_out_regex,
+                hold_out_p_subtrees=args.dsam_hold_out_p_subtrees,
+                max_held_examples=args.dsam_max_held_examples,
+                use_intermediates=args.lm_with_token_labels,
+                balance_depths=args.dsam_balance_depths,
+                lm_mode=language_model)
+        else:
+            in_vocab = CharVocabulary(chars=set('0123456789+*()[]xyzL=_'), ignore_char='_', ignore_char_idx=0)
+            datasets = load_dataset(args.dsam_data_file)
     else:
         datasets, in_vocab, _ = build_datasets_lm()
+
+    
+
+    if args.dsam_save_dir:
+        folder_name = construct_dataset_detail_string(args)
+        output_dir = os.path.join(args.dsam_save_dir, folder_name)
+        print("Saving dataset to directory")
+
+        datasets.save_to_disk(output_dir, num_proc=8)
 
     return datasets, in_vocab
 
@@ -281,6 +295,9 @@ def main_lm(args):
 
     datasets, in_vocab = get_datasets_and_vocab(args, language_model)
 
+    for name, dataset in datasets.items():
+        dataset.to_json(f'report_dataset_2json/{name}', num_proc=8)
+
     if language_model:
         model, interface = get_base_transformer_lm(
             args, in_vocab, model_load_path=args.model_load_path)
@@ -333,6 +350,21 @@ def construct_run_detail_string(args):
      f"dsheight_{args.dsam_max_tree_height}_dsmin_{args.dsam_min_tree_height}_regularize_{args.regularize}_gold_{args.use_gold}"
 
     return run_string
+
+def construct_dataset_detail_string(args):
+    detail_string = (
+        f"minH_{args.dsam_min_tree_height}_maxH_{args.dsam_max_tree_height}_"
+        f"maxW_{args.dsam_max_tree_width}_"
+        f"holdUniq_{args.dsam_hold_out_n_unique_examples}_"
+        f"regex_{args.dsam_hold_out_regex}_"
+        f"pSub_{args.dsam_hold_out_p_subtrees}_"
+        f"maxHeld_{('none' if args.dsam_max_held_examples is None else args.dsam_max_held_examples)}_"
+        f"balance_{args.dsam_balance_depths}"
+        f"inter_{args.lm_with_token_labels}"
+    )
+
+    return detail_string
+
 
 def validate_args(args):
     # Check model_load_path and eval_only conditions
@@ -432,6 +464,7 @@ if __name__ == "__main__":
     parser.add_argument("--dsam_hold_out_p_subtrees", type=float, default=0.0, help="Hold out examples which match this proportion of unique subtrees and use them as the test set.")
     parser.add_argument("--dsam_max_held_examples", type=int, default=None, help="If specified, randomly cut held out set down to this many examples. Useful when holding out subtrees with a lot of data.")
     parser.add_argument("--dsam_balance_depths", action="store_true")
+    parser.add_argument("--dsam_save_dir", type=str, default=None, help="Output directory for saving dsam file, this will automatically toggle saving of dataset")
 
     args = parser.parse_args()
 
