@@ -295,9 +295,6 @@ def main_lm(args):
 
     datasets, in_vocab = get_datasets_and_vocab(args, language_model)
 
-    for name, dataset in datasets.items():
-        dataset.to_json(f'report_dataset_2json/{name}', num_proc=8)
-
     if language_model:
         model, interface = get_base_transformer_lm(
             args, in_vocab, model_load_path=args.model_load_path)
@@ -317,7 +314,7 @@ def main_lm(args):
         args.save_dir = os.path.join(dir_path, args.save_dir)
         os.makedirs(args.save_dir, exist_ok=True)
 
-    eval_keys = ["val", "test"]
+    eval_keys = ["validation", "test"]
 
     if args.eval_only:
         raise ValueError("Testing functionality not implemented yet!")
