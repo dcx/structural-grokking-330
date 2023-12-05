@@ -139,7 +139,7 @@ def build_dataset_addmult_mod10(
         'test': test,
     })
 
-    tokenizer = CharVocabulary(chars=set('0123456789+*()[]xyzL=_'), ignore_char='_', ignore_char_idx=0)
+    tokenizer = CharVocabulary(chars=set('0123456789+*()[]abcxyzLFI<=_'), ignore_char='_', ignore_char_idx=0)
     remove_columns = ['height', 'width', 'example', 'answer', 'ans_mod10', 'ans_sublabels', 'tree_sig']
     if lm_mode and not use_intermediates:
         dataset = dataset.map(lambda example, idx: {  

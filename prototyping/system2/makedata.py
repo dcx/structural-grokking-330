@@ -30,7 +30,10 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
 
         idx = 0
         n_items_per_height = n_examples // (max_height - min_height + 1)
-        for j,height in enumerate(range(min_height, max_height+1)):
+        # iterate backwards: from max_height to min_height
+        # reason: pandas/hf CSV parsers infer dtypes from first few rows, 
+        # they get confused by the height=1 examples (all ints)
+        for j,height in enumerate(range(max_height, min_height-1, -1)):
             for i in range(n_items_per_height):
                 interpreter.reset()
                 data = {}
@@ -218,7 +221,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('prototyping/system2-data/test-5k-6-8.csv', 5000, min_height=6, max_height=8, n_processes=8, stepwise=True)
+    make_data_mp('prototyping/system2-data/addmultletiffor-2m-231205-balanced-flat.csv', 2000000, min_height=1, max_height=8, n_processes=20, stepwise=False)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')
