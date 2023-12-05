@@ -38,6 +38,7 @@ class TransformerLM(torch.nn.Module):
         encoder_sos: bool = True,
         embedding_init: str = "pytorch",
         scale_mode: str = "none",
+        device: str = 'cuda',
         **kwargs
     ):
         """
@@ -53,6 +54,8 @@ class TransformerLM(torch.nn.Module):
         assert embedding_init in ["pytorch", "xavier", "kaiming"]
 
         self.tied_embedding = tied_embedding
+        self.device = device
+        
 
         self.encoder_eos = n_input_tokens
         self.encoder_sos = n_input_tokens + 1 if encoder_sos else None
@@ -74,12 +77,13 @@ class TransformerLM(torch.nn.Module):
         self.reset_parameters()
         # need this flag for the training loop helpers
         self.mode = "lm"
+        self.to(device)
 
     def construct(self, transformer, **kwargs):
         self.input_embedding = torch.nn.Embedding(
             self.n_input_tokens + 1 + int(self.encoder_sos is not None),
             self.state_size,
-        )
+        ).to(self.device)
 
         if self.tied_embedding:
             self.output_map = TiedEmbedding(self.input_embedding.weight)

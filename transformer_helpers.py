@@ -10,10 +10,10 @@ from interfaces import (
 from models.transformer_lm import TransformerLM
 
 
-def create_lm(in_vocab_size, vec_dim, n_heads, encoder_n_layers) -> torch.nn.Module:
+def create_lm(in_vocab_size, vec_dim, n_heads, encoder_n_layers, device='cpu') -> torch.nn.Module:
     args = dict(embedding_init="xavier", scale_mode="opennmt")
     return TransformerLM(
-        in_vocab_size, vec_dim, n_heads=n_heads, num_encoder_layers=encoder_n_layers, **args
+        in_vocab_size, vec_dim, n_heads=n_heads, num_encoder_layers=encoder_n_layers, device=device, **args
     )
 
 

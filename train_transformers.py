@@ -107,6 +107,7 @@ def get_base_transformer_lm(
     n_heads: int,
     encoder_n_layers: int,
     model_load_path: str = None,
+    device='cpu'
 ):
     """
     Returns a base transformer language model and its interface.
@@ -119,7 +120,7 @@ def get_base_transformer_lm(
     Returns:
         tuple: A tuple containing the model and its interface.
     """
-    model = create_lm(len(in_vocab), vec_dim, n_heads, encoder_n_layers)
+    model = create_lm(len(in_vocab), vec_dim, n_heads, encoder_n_layers, device=device)
     if model_load_path:
         print(f"INFO: Loading pretrained model from {model_load_path}")
         model.load_state_dict(

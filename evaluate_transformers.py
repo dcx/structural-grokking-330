@@ -202,6 +202,7 @@ class LMEvaluator:
         n_heads,
         encoder_n_layers,
         model_load_path=None,
+        device='cpu'
     ):
         assert model_load_path, (
             "Must input load path in order to evaluate model,"
@@ -213,6 +214,7 @@ class LMEvaluator:
             n_heads,
             encoder_n_layers,
             model_load_path=model_load_path,
+            device=device
         )
 
         self.model = model
