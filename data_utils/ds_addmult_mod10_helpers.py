@@ -12,7 +12,7 @@ import collate
 from tqdm import tqdm
 from util import test_continuations
 
-random.seed(42)
+random.seed(10)
 
 def build_dataset_addmult_mod10(
     data_file: str, 

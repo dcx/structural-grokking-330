@@ -176,7 +176,6 @@ def get_datasets_and_vocab(args, language_model: bool):
         datasets, in_vocab, _ = build_datasets_lm()
 
     
-
     if args.dsam_save_dir:
         folder_name = construct_dataset_detail_string(args)
         output_dir = os.path.join(args.dsam_save_dir, folder_name)
@@ -356,8 +355,8 @@ def construct_dataset_detail_string(args):
         f"regex_{args.dsam_hold_out_regex}_"
         f"pSub_{args.dsam_hold_out_p_subtrees}_"
         f"maxHeld_{('none' if args.dsam_max_held_examples is None else args.dsam_max_held_examples)}_"
-        f"balance_{args.dsam_balance_depths}"
-        f"inter_{args.lm_with_token_labels}"
+        f"bal_{args.dsam_balance_depths}_"
+        f"int_{args.lm_with_token_labels}"
     )
 
     return detail_string
