@@ -62,8 +62,6 @@ def get_final_hidden_state(evaluator, input_data):
 
     # Otherwise there will be non-deterministic output
     
-
-    input_data = input_data.unsqueeze(0)
     embed = evaluator.model.input_embed(input_data)
     # Maybe I need this?? TransformerLM uses pos_embed, both work tho!
     pos_embed = evaluator.model.pos_embed(embed, 0)
@@ -74,7 +72,8 @@ def get_final_hidden_state(evaluator, input_data):
     return hidden_states
     
 
-
+# ''.join([str(i) for i in row.tolist()])
+# 
 
 def train(evaluator, classifier, data_loader, optimizer, criterion, device='cpu', eval_steps =1000):
 
@@ -90,17 +89,20 @@ def train(evaluator, classifier, data_loader, optimizer, criterion, device='cpu'
                 curr_batch_dict_gpu[key] = batch[key]
             else:
                 curr_batch_dict_gpu[key] = batch[key].to(device)
-        inputs, labels = curr_batch_dict_gpu['in'], curr_batch_dict_gpu['labels']
+        inputs, labels = curr_batch_dict_gpu['in'].T, curr_batch_dict_gpu['labels'].T
 
         evaluator.model.eval()
 
+        column_length = len(inputs[0])
+
         with torch.no_grad():
-            for r_idx, row in enumerate(inputs):
-                for idx, _ in enumerate(row):
+
+            for idx in range(column_length):
                     idx +=1 
 
-                    column = row[0:idx]
-                    label = labels[r_idx-1][0:idx]
+                    column = inputs[:, 0:idx]
+                    label = labels[:, 0:idx]
+
                 
                     hidden_states = get_final_hidden_state(evaluator, column)
 
@@ -108,17 +110,12 @@ def train(evaluator, classifier, data_loader, optimizer, criterion, device='cpu'
                     for i in range(hidden_states.shape[1]):
 
                         # 0 is for the batch size select, will remove this.
-                        outputs = classifier(hidden_states[0,i])
-                        outputs = outputs.unsqueeze(0).float()
+                        outputs = classifier(hidden_states[:,i]).float()
                         
-                        if len(label) > 1:
-                            sliced_label = label[i].unsqueeze(0)
-                        else:
-                            sliced_label = label
-                        loss = criterion(outputs, sliced_label)
+                        loss = criterion(outputs, label[:, i])
                         optimizer.zero_grad()
                         
-                        loss = torch.autograd.Variable(loss, requires_grad = True)
+                        # loss = torch.autograd.Variable(loss, requires_grad = True)
                         loss.backward()
                         optimizer.step()
 
