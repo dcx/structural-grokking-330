@@ -34,7 +34,7 @@ def process_split(sents, split_by_words):
         new_sents.append(" ".join(remove_fullstop(sent_words[:idx])))
     return new_sents, target_words
 
-def run_lm_decoding(tokenizer, lm, prefixes, gpu_id):
+def run_lm_decoding(tokenizer, lm, prefixes, device='cpu'):
     data_collator = collate.VarLengthCollate(None)
     max_decoding_steps = 50
     # the tokenizer just adds an <SOS> token to the front of the string
@@ -49,7 +49,7 @@ def run_lm_decoding(tokenizer, lm, prefixes, gpu_id):
 
     batch_size = 128
     st = 0
-    device = torch.device("cuda:{}".format(gpu_id))
+    device = torch.device(device)
     decoded_sents = []
     while st < len(prefixes):
         en = min(len(prefixes), st + batch_size)
@@ -68,7 +68,7 @@ def run_lm_decoding(tokenizer, lm, prefixes, gpu_id):
 
 
 def test_continuations(
-    tokenizer, lm, prefixes, gpu_id, get_attn_scores=False, attn_layer=-1, batch_size=32
+    tokenizer, lm, prefixes, get_attn_scores=False, attn_layer=-1, gpu_id=0, batch_size=32, device='cpu'
 ):
     data_collator = collate.VarLengthCollate(None)
 
@@ -83,7 +83,7 @@ def test_continuations(
         return inp["in"].transpose(0, 1), in_len
 
     st = 0
-    device = torch.device("cuda:{}".format(gpu_id))
+    device = torch.device(device)
 
     if get_attn_scores:
         attn_flows_agg = []
@@ -140,17 +140,17 @@ def get_gpt2_lm(model_path):
     return model, tokenizer
 
 
-def test_continuations_gpt2(tokenizer, lm, prefixes, gpu_id):
+def test_continuations_gpt2(tokenizer, lm, prefixes, gpu_id, device='cuda'):
     all_logits = []
     all_chars = "abcdefghijklmnopqrst"
     all_brackets = ["(" + c for c in all_chars] + [c + ")" for c in all_chars]
     for prefix in tqdm(prefixes):
-        curr_logits = get_gpt2_pred_helper(prefix, lm, tokenizer, all_brackets, gpu_id)
+        curr_logits = get_gpt2_pred_helper(prefix, lm, tokenizer, all_brackets, gpu_id, device=device)
         all_logits.append(curr_logits)
     return torch.cat(all_logits, dim=0)
 
 
-def get_gpt2_pred_helper(prefix, model, tokenizer, all_brackets, gpu_id=-1):
+def get_gpt2_pred_helper(prefix, model, tokenizer, all_brackets, gpu_id=-1, device='cuda'):
     """
     model: GPT2Model
     tokenizer: GPT2tokenizer
@@ -161,7 +161,7 @@ def get_gpt2_pred_helper(prefix, model, tokenizer, all_brackets, gpu_id=-1):
     curr_score = []
     all_continuations = [prefix + " {}".format(bracket) for bracket in all_brackets]
     ei = tokenizer(all_continuations, return_tensors="pt")
-    if gpu_id != -1:
+    if gpu_id != -1 and 'cuda' in device:
         device = torch.device("cuda:{}".format(gpu_id))
         ei = {key: val.to(device) for key, val in ei.items()}
     model.eval()

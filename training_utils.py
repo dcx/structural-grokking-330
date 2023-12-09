@@ -259,11 +259,11 @@ def train_loop(
                 if num_steps % regularizer_steps == 0:
                     if (regularizer is not None):
                         if (regularize_all):
-                            sci_charts = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                            sci_charts = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, device=device, parse_splits=None, batch=True)
                         else:
-                            sci_charts = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                            sci_charts = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, device=device, parse_splits=None, batch=True)
                         if (args.mean_regularize):
-                            sci_scores = regularizer.get_score(sci_charts, mean=True)
+                            sci_scores = regularizer.get_score(sci_charts, mean=True, device=device)
                         else:
                             sci_scores = regularizer.get_score(sci_charts, mean=False)
                         # print(sci_scores)

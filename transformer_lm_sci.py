@@ -111,7 +111,7 @@ def compute_attention_sparsity(args, model_name):
         raise Exception
 
     lm, _ = get_base_transformer_lm(args, in_vocab, model_name=model_name)
-    device = torch.device("cuda:{}".format(args.gpu_id))
+    device = torch.device(args.device)
     lm.to(device)
 
     def tokenizer(s, add_special_tokens=True):
@@ -144,7 +144,7 @@ def compute_model_norm(args, model_name):
         raise Exception
 
     lm, _ = get_base_transformer_lm(args, in_vocab, model_name=model_name)
-    device = torch.device("cuda:{}".format(args.gpu_id))
+    device = torch.device(args.device)
     lm.to(device)
 
     model_norm = get_norm(lm)
@@ -162,7 +162,7 @@ def compute_sci_helper_fn(
     args, in_vocab, model_name, in_sentences, targets, gold_parses, ret_vals
 ):
     lm, _ = get_base_transformer_lm(args, in_vocab, model_name=model_name)
-    device = torch.device("cuda:{}".format(args.gpu_id))
+    device = torch.device(args.device)
     lm.to(device)
 
     mname = model_name.split("/")[-2]

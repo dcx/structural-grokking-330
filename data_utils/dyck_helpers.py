@@ -357,7 +357,7 @@ def build_datasets_dyck(vocab=20, stack_depth=10):
 
 
 
-def eval_callback_dyck(lm, in_vocab, split, eval_batch_size=32):
+def eval_callback_dyck(lm, in_vocab, split, eval_batch_size=32, device='cpu'):
     def tokenizer(s):
         return [lm.encoder_sos] + in_vocab(s)
 
@@ -378,7 +378,7 @@ def eval_callback_dyck(lm, in_vocab, split, eval_batch_size=32):
         if len(prefixes) >= 5000:
             break
 
-    out = test_continuations(tokenizer, lm, prefixes, 0, batch_size=eval_batch_size)
+    out = test_continuations(tokenizer, lm, prefixes, 0, batch_size=eval_batch_size, device=device)
     vocab_items_closing_brackets = [
         in_vocab.words[s] for s in in_vocab.words if ")" in s
     ]

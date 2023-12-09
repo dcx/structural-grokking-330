@@ -176,7 +176,7 @@ def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, du
     print(f'Accuracy on {split} data: {accuracy:.2f}')
     return accuracy
 
-def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32, dump=False, dump_file_path=""):
+def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32, dump=False, dump_file_path="", device='cpu'):
     """PROTOTYPE. Not finished"""
     # Assuming 'datasets' is a dictionary containing your data splits (train, val, test, etc.)
     # and 'split' is the key for the data split you want to evaluate on (e.g., 'val', 'test').
@@ -198,7 +198,7 @@ def eval_callback_mod10_lm(lm, in_vocab, split, datasets, eval_batch_size=32, du
     if (dump):
         dump_file = open(dump_file_path, 'w')
 
-    out = test_continuations(tokenizer, lm, queries, 0, batch_size=eval_batch_size)
+    out = test_continuations(tokenizer, lm, queries, gpu_id=0, batch_size=eval_batch_size, device=device)
     desired_out = '0123456789'
     desired_out_idx = [in_vocab(w) for w in desired_out]
     out = out[:, desired_out_idx]

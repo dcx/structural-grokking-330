@@ -151,8 +151,7 @@ class MultiHeadAttention(AbsPosAttentionBase):
             curr_state.shape[0], q.shape[1], mask, q, k, v
         )
         if need_weights:
-            # Calculate the mean over the heads
-            return data, scores.mean(1)
+            return data, scores
         else:
             return data
 

@@ -1,0 +1,27 @@
+name: minimal_env
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python==3.9
+  - datasets==2.14.5
+  - tensorboard
+  - hypothesis==6.88.1
+  - lark==1.1.7
+  - matplotlib
+  - pandas
+  - streamlit
+  - numpy
+  - Pillow
+  - scipy==1.11.3
+  - tqdm==4.66.1
+  - transformers
+  - wandb
+  - pytorch::pytorch
+  - pytorch-cuda==11.7
+  - scikit-learn
+  - seaborn
+  - pip
+  - pip:
+    - bertviz

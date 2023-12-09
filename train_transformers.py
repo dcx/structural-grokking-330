@@ -10,24 +10,26 @@ from vocabulary import CharVocabulary
 from data_utils import (
     build_datasets_lm,
     build_datasets_tense_inflection,
-    build_dataset_addmult_mod10
+    build_dataset_addmult_mod10,
 )
 from data_utils.dyck_helpers import build_datasets_dyck, eval_callback_dyck
 from data_utils.lm_dataset_helpers import eval_lm_callback
 from data_utils.tense_inflection_helpers import eval_callback_tense_inflection
 from data_utils.ds_addmult_mod10_helpers import (
     eval_callback_mod10,
-    eval_callback_mod10_lm
+    eval_callback_mod10_lm,
 )
 from transformer_helpers import create_model, create_lm, create_model_interface
 from training_utils import train_loop
 from regularizer_new import Chart
 
+
 WANDB_USERS = {
     "kyle": {"project": "research-cs330", "entity": "mcgrathk"},
     "derek": {"project": "330", "entity": "dcx"},
-    "ananjan": {"project": "structural-grokking", "entity": "tgk-ananjan"}
+    "ananjan": {"project": "structural-grokking", "entity": "tgk-ananjan"},
 }
+
 
 def working_dir() -> str:
     """
@@ -53,7 +55,12 @@ def working_dir() -> str:
         return helper(f"/scr/smurty/biggest")
 
 
-def get_base_transformer_model(args, in_vocab: CharVocabulary, out_vocab: CharVocabulary, model_load_path: str = None):
+def get_base_transformer_model(
+    args,
+    in_vocab: CharVocabulary,
+    out_vocab: CharVocabulary,
+    model_load_path: str = None,
+):
     """
     Returns a base transformer model and its interface.
 
@@ -75,15 +82,16 @@ def get_base_transformer_model(args, in_vocab: CharVocabulary, out_vocab: CharVo
         args.decoder_n_layers,
         mode=args.mode,
         relative=args.relative,
-        is_null_encoder=args.enc
+        is_null_encoder=args.enc,
     )
 
     # initial_parameters = {name: param.clone() for name, param in model.named_parameters()}
 
     if model_load_path:
         print(f"INFO: Loading pretrained model from {model_load_path}")
-        model.load_state_dict(torch.load(
-            model_load_path, map_location=torch.device("cpu")))
+        model.load_state_dict(
+            torch.load(model_load_path, map_location=torch.device("cpu"))
+        )
 
     # validate model loaded correctly
     # for name, param in model.named_parameters():
@@ -93,7 +101,13 @@ def get_base_transformer_model(args, in_vocab: CharVocabulary, out_vocab: CharVo
     return model, interface
 
 
-def get_base_transformer_lm(args, in_vocab: CharVocabulary, model_load_path: str = None):
+def get_base_transformer_lm(
+    in_vocab: CharVocabulary,
+    vec_dim: int,
+    n_heads: int,
+    encoder_n_layers: int,
+    model_load_path: str = None,
+):
     """
     Returns a base transformer language model and its interface.
 
@@ -105,12 +119,12 @@ def get_base_transformer_lm(args, in_vocab: CharVocabulary, model_load_path: str
     Returns:
         tuple: A tuple containing the model and its interface.
     """
-    model = create_lm(len(in_vocab), args.vec_dim,
-                      args.n_heads, args.encoder_n_layers)
+    model = create_lm(len(in_vocab), vec_dim, n_heads, encoder_n_layers)
     if model_load_path:
         print(f"INFO: Loading pretrained model from {model_load_path}")
-        model.load_state_dict(torch.load(
-            model_load_path, map_location=torch.device("cpu")))
+        model.load_state_dict(
+            torch.load(model_load_path, map_location=torch.device("cpu"))
+        )
     interface = create_model_interface(model, is_lm=True)
     return model, interface
 
@@ -135,8 +149,10 @@ def init_wandb(args):
     Args:
         args: Command line arguments.
     """
-    wandb.init(project=WANDB_USERS[args.wandb_user]["project"],
-               entity=WANDB_USERS[args.wandb_user]["entity"])
+    wandb.init(
+        project=WANDB_USERS[args.wandb_user]["project"],
+        entity=WANDB_USERS[args.wandb_user]["entity"],
+    )
     wandb.run.name = f"{args.save_dir}-{args.seed}"
     wandb.run.save()
 
@@ -153,23 +169,28 @@ def get_datasets_and_vocab(args, language_model: bool):
         tuple: A tuple containing the datasets and input vocabulary.
     """
     if args.dataset == "dyck":
-        datasets, in_vocab, _ =  build_datasets_dyck(vocab=args.dyck_vocab)
+        datasets, in_vocab, _ = build_datasets_dyck(vocab=args.dyck_vocab)
     elif args.dataset == "tense":
         datasets, in_vocab, _ = build_datasets_tense_inflection()
     elif args.dataset == "ds-addmult-mod10":
         datasets, in_vocab = build_dataset_addmult_mod10(
-            data_file=args.dsam_data_file, min_tree_height=args.dsam_min_tree_height, 
-            max_tree_height=args.dsam_max_tree_height, max_tree_width=args.dsam_max_tree_width, 
+            data_file=args.dsam_data_file,
+            min_tree_height=args.dsam_min_tree_height,
+            max_tree_height=args.dsam_max_tree_height,
+            max_tree_width=args.dsam_max_tree_width,
             hold_out_n_unique_examples=args.dsam_hold_out_n_unique_examples,
             hold_out_regex=args.dsam_hold_out_regex,
-            lm_mode=language_model)
+            lm_mode=language_model,
+        )
     else:
         datasets, in_vocab = build_datasets_lm()
 
     return datasets, in_vocab
 
 
-def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
+def get_callback_fn(
+    args, language_model: bool, model, in_vocab, datasets, device="cpu"
+):
     """
     Returns the appropriate callback function based on the dataset type specified in args.
 
@@ -188,13 +209,32 @@ def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
 
     dataset_callbacks = {
         "lm": lambda split: eval_lm_callback(model, in_vocab, split),
-        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
-        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
+        "tense": lambda split: eval_callback_tense_inflection(
+            model, in_vocab, split, device=device
+        ),
+        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split, device=device),
+        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(
+            model,
+            in_vocab,
+            split,
+            datasets,
+            eval_batch_size=args.batch_size_eval,
+            device=device,
+        )
+        if language_model
+        else eval_callback_mod10(
+            model,
+            in_vocab,
+            split,
+            datasets,
+            eval_batch_size=args.batch_size_eval,
+            device=device,
+        ),
     }
 
-    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
+    return dataset_callbacks.get(
+        args.dataset, lambda split: Exception("Invalid dataset")
+    )
 
 
 def main_lm(args):
@@ -205,39 +245,12 @@ def main_lm(args):
         args: Command line arguments.
     """
     language_model = args.lm
-    out_vocab = CharVocabulary(chars=set('0123456789'))
+    out_vocab = CharVocabulary(chars=set("0123456789"))
 
     datasets, in_vocab = get_datasets_and_vocab(args, language_model)
 
     return datasets, in_vocab
 
-
-def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
-    """
-    Returns the appropriate callback function based on the dataset type specified in args.
-
-    Args:
-        args: Command line arguments.
-        language_model (bool): Flag to determine if it's a language model.
-        model: The trained model.
-        in_vocab (CharVocabulary): Input vocabulary.
-        datasets: The datasets used for training and evaluation.
-
-    Returns:
-        function: The corresponding callback function.
-    """
-    if not args.callback:
-        return None
-
-    dataset_callbacks = {
-        "lm": lambda split: eval_lm_callback(model, in_vocab, split),
-        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
-        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model else eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval)
-    }
-
-    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
 
 def get_regularizer(args, in_vocab):
     """
@@ -246,11 +259,11 @@ def get_regularizer(args, in_vocab):
     Args:
         args: Command line arguments.
     """
-    if (args.distance_fn == "cosine"):
+    if args.distance_fn == "cosine":
         dist_fn = lambda x1, x2: F.cosine_similarity(x1, x2, dim=-1)
     else:
-        dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
-    if (args.regularize):
+        dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2) ** 2, dim=-1))
+    if args.regularize:
         if args.dataset == "ds-addmult-mod10":
             regularizer = Chart(dist_fn, in_vocab, spaces=False)
         else:
@@ -258,6 +271,7 @@ def get_regularizer(args, in_vocab):
     else:
         regularizer = None
     return regularizer
+
 
 def main_lm(args):
     """
@@ -267,23 +281,30 @@ def main_lm(args):
         args: Command line arguments.
     """
     language_model = args.lm
-    out_vocab = CharVocabulary(chars=set('0123456789'))
+    out_vocab = CharVocabulary(chars=set("0123456789"))
 
     datasets, in_vocab = get_datasets_and_vocab(args, language_model)
 
     if language_model:
         model, interface = get_base_transformer_lm(
-            args, in_vocab, model_load_path=args.model_load_path)
+            in_vocab,
+            args.vec_dim,
+            args.n_heads,
+            args.encoder_n_layers,
+            model_load_path=args.model_load_path,
+        )
     else:
         model, interface = get_base_transformer_model(
-            args, in_vocab, out_vocab, model_load_path=args.model_load_path)
+            args, in_vocab, out_vocab, model_load_path=args.model_load_path
+        )
 
     callback_fn = get_callback_fn(
-        args, language_model, model, in_vocab, datasets)
-    
+        args, language_model, model, in_vocab, datasets, device=args.device
+    )
+
     regularizer = get_regularizer(args, in_vocab)
 
-    device = torch.device(f"cuda:{args.gpu_id}")
+    device = torch.device(args.device)
     model.to(device)
     if args.save_dir:
         dir_path = working_dir()
@@ -293,7 +314,10 @@ def main_lm(args):
     eval_keys = ["val", "test"]
 
     if args.eval_only:
-        raise ValueError("Testing functionality not implemented yet!")
+        raise NotImplementedError(
+            "Evaluation is implemented in evaluate_transformer.py"
+        )
+        evaluate_network(args, interface, datasets["test"], tokenizer=in_vocab)
     else:
         train_loop(
             args,
@@ -306,7 +330,7 @@ def main_lm(args):
             args.save_interval,
             in_vocab=in_vocab,
             callback_fn=callback_fn,
-            regularizer = regularizer
+            regularizer=regularizer,
         )
 
 
@@ -314,7 +338,9 @@ def validate_args(args):
     # Check model_load_path and eval_only conditions
     if args.model_load_path:
         if not args.eval_only:
-            print("WARNING: Not evaluating, resuming training at loaded model checkpoint")
+            print(
+                "WARNING: Not evaluating, resuming training at loaded model checkpoint"
+            )
         else:
             print("INFO: Evaluating model, no training will occur")
     elif args.eval_only:
@@ -323,16 +349,20 @@ def validate_args(args):
     # Print model checkpoint folder if saving is enabled
     if args.save_model:
         print(
-            f"INFO: Saving model checkpoints in folder: '{os.path.abspath(os.path.join(os.getcwd(), args.save_dir))}'")
+            f"INFO: Saving model checkpoints in folder: '{os.path.abspath(os.path.join(os.getcwd(), args.save_dir))}'"
+        )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_load_path", type=str, default="",
-                        help="Path of model to resume training, or ")
+    parser.add_argument(
+        "--model_load_path",
+        type=str,
+        default="",
+        help="Path of model to resume training, or evaluate",
+    )
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
-    parser.add_argument("--eval_only", action="store_true")
     parser.add_argument("--dump_errs", action="store_true")
     parser.add_argument("--dump_file", type=str, default="")
     parser.add_argument("--vec_dim", type=int, default=512)
@@ -346,14 +376,57 @@ if __name__ == "__main__":
     parser.add_argument("--relative", type=bool, default=False)
     parser.add_argument("--lm", type=bool, default=False)
     parser.add_argument("--enc", type=bool, default=False)
-    parser.add_argument("--regularize", type=bool, default=False, help="Turn on tree regularization.")
-    parser.add_argument("--mean_regularize", type=bool, default=False, help="Use mean version of regularizer.")
-    parser.add_argument("--distance_fn", type=str, default="cosine", help="Distance function used by regularization.")
-    parser.add_argument("--regularize_all", type=bool, default=False, help="Regularize using all strings in training set (just keep this off).")
-    parser.add_argument("--regularizer_rel_wt", type=float, default=0.1, help="Initial relative weight of regularizer wrt objective loss.")
-    parser.add_argument("--regularizer_steps", type=int, default=2, help="Regularize every regularizer_steps training steps.")
-    parser.add_argument("--regularizer_delta", type=float, default=0.0, help="Increase relative weight of regularizer by this value every change_steps of training")
-    parser.add_argument("--change_steps", type=int, default=500, help="Increase relative weight of regularizer after this number of regularization steps")
+    parser.add_argument(
+        "--regularize", type=bool, default=False, help="Turn on tree regularization."
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Default device to run computation on",
+    )
+    parser.add_argument(
+        "--mean_regularize",
+        type=bool,
+        default=False,
+        help="Use mean version of regularizer.",
+    )
+    parser.add_argument(
+        "--distance_fn",
+        type=str,
+        default="cosine",
+        help="Distance function used by regularization.",
+    )
+    parser.add_argument(
+        "--regularize_all",
+        type=bool,
+        default=False,
+        help="Regularize using all strings in training set (just keep this off).",
+    )
+    parser.add_argument(
+        "--regularizer_rel_wt",
+        type=float,
+        default=0.1,
+        help="Initial relative weight of regularizer wrt objective loss.",
+    )
+    parser.add_argument(
+        "--regularizer_steps",
+        type=int,
+        default=2,
+        help="Regularize every regularizer_steps training steps.",
+    )
+    parser.add_argument(
+        "--regularizer_delta",
+        type=float,
+        default=0.0,
+        help="Increase relative weight of regularizer by this value every change_steps of training",
+    )
+    parser.add_argument(
+        "--change_steps",
+        type=int,
+        default=500,
+        help="Increase relative weight of regularizer after this number of regularization steps",
+    )
 
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--batch_size_eval", type=int, default=8)
@@ -368,27 +441,48 @@ if __name__ == "__main__":
     parser.add_argument("--tree_transform", action="store_true")
     # evaluating can be time consuming so we can do that later...
     parser.add_argument("--dyck_vocab", type=int, default=20)
-    parser.add_argument("--wandb_user", type=str, default=None,
-                        required=True, choices=['ananjan', 'derek', 'kyle'])
+    parser.add_argument(
+        "--wandb_user",
+        type=str,
+        default=None,
+        required=True,
+        choices=["ananjan", "derek", "kyle"],
+    )
 
     parser.add_argument("--callback", action="store_true")
     # args for ds-addmult-mod10
-    parser.add_argument("--dsam_data_file", type=str, default="data_utils/ds_addmult_mod10_data/data-addmult-231102-1.5m.csv")
+    parser.add_argument(
+        "--dsam_data_file",
+        type=str,
+        default="data_utils/ds_addmult_mod10_data/data-addmult-231102-1.5m.csv",
+    )
     parser.add_argument("--dsam_min_tree_height", type=int, default=1)
     parser.add_argument("--dsam_max_tree_height", type=int, default=4)
     parser.add_argument("--dsam_max_tree_width", type=int, default=80)
-    parser.add_argument("--dsam_hold_out_n_unique_examples", type=int, default=0, help="Hold out this many unique examples and use them as the test set.")
-    parser.add_argument("--dsam_hold_out_regex", type=str, default=None, help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))")
+    parser.add_argument(
+        "--dsam_hold_out_n_unique_examples",
+        type=int,
+        default=0,
+        help="Hold out this many unique examples and use them as the test set.",
+    )
+    parser.add_argument(
+        "--dsam_hold_out_regex",
+        type=str,
+        default=None,
+        help="Hold out examples which match this regex and use them as the test set. If using >1 holdout option, the union of the two is used as the test set. Accepts unescaped regexes, e.g. (+(*3(+..))(...))",
+    )
 
-
-
-    
+    # Evaluation args. This should be a subprogram if we feel comfortable to refactor to click.
+    parser.add_argument("--eval_only", action="store_true")
+    parser.add_argument("--eval_single_input", type=str, default="")
+    parser.add_argument("--eval_dataset", action="store_true", default=False)
+    parser.add_argument("--eval_confusion_matrix", action="store_true", default=False)
 
     args = parser.parse_args()
 
     validate_args(args)
 
     # Main program
-    init_wandb(args)
+    init_wandb(args) 
     set_seed(args)
     main_lm(args)
