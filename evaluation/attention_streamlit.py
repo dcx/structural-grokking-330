@@ -36,12 +36,12 @@ def main():
     st.sidebar.title("Settings")
     model_folder = st.sidebar.text_input(
         "Enter model weight storage folder",
-        "/Users/kylemcgrath/projects/structural-grokking-330/sample_runs/",
+        "/home/x11kjm/sweeps/probe_base/run_nhead_8_enclayer_7_vec_512_dsheight_8_dsmin_1_regularize_False_gold_False",
     )
     model_file = st.sidebar.selectbox("Select Model", sorted(os.listdir(model_folder)))
     vec_dim = st.sidebar.number_input("Vector Dimension", 512)
-    n_heads = st.sidebar.number_input("Number of Heads", 4, step=1)
-    encoder_n_layers = st.sidebar.number_input("Number of Encoder Layers", 2, step=1)
+    n_heads = st.sidebar.number_input("Number of Heads", 8, step=1)
+    encoder_n_layers = st.sidebar.number_input("Number of Encoder Layers", 7, step=1)
     dataset_type = st.sidebar.selectbox(
         "Select Dataset Type", ["ds-addmult-mod10", "let"]
     )
@@ -54,8 +54,9 @@ def main():
     else:
         run_button_key = "run_button"
 
-    if st.button("Run model", key=run_button_key):
-        # if True:
+    # if st.button("Run model", key=run_button_key):
+
+    if True:
         MODEL_LOAD_PATH = os.path.join(model_folder, model_file)
         tokens = list(input_sentence)
 

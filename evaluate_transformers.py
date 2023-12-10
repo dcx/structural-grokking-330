@@ -299,7 +299,7 @@ class ClassifierEvaluator:
 
 def get_vocab(dataset_type):
     if dataset_type == "ds-addmult-mod10":
-        in_vocab = CharVocabulary(chars=set("0123456789+*()="))
+        in_vocab = CharVocabulary(chars=set('0123456789+*()[]xyzL=_'), ignore_char='_', ignore_char_idx=0)
         out_vocab = CharVocabulary(chars=set("0123456789"))
     elif dataset_type == "let":
         raise NotImplementedError("dataset_type 'let' not implemented yet")
