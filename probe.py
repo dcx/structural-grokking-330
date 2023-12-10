@@ -44,32 +44,29 @@ class TwoLayerMLP(nn.Module):
         return self.fc2(x)
 
 
-def get_final_hidden_state(evaluator, input_data, input_lengths, device='cuda'):
+def get_final_hidden_state(evaluator, input_data, input_lengths, labels=None, device='cuda'):
     with torch.no_grad():
-        embed = evaluator.model.input_embed(input_data)
-        # pos_embed = evaluator.model.pos_embed(embed, 0)
-        # hidden_states = evaluator.model.trafo.get_hidden_states(embed, is_lm=False, layer_id=0)
-        
-        max_len = embed.shape[1]
+        embed = evaluator.model.input_embed(input_data)        
+        max_len = torch.tensor(embed.shape[1]).to(device)
+
+        mask = evaluator.model.generate_len_mask(max_len, input_lengths)
+
 
         input = input_data
-
         prefix_sos = (torch.ones((input.shape[0],1)).long() * evaluator.model.encoder_sos).to(device)
         input = torch.cat((prefix_sos, input), dim=1) # add SOS token
         input_lengths += 1
         outputs = evaluator.model(input, input_lengths)
-        input_lengths = input_lengths.long()
-        mask = torch.arange(max_len).expand(len(input_lengths), max_len) >= input_lengths.unsqueeze(1)
-        
-        mask = mask.to(device)
-        #mask = mask.unsqueeze(2).dtype(torch.long)
+        _, preds = torch.max(outputs['data'], dim=2)
 
-        #mask = mask.expand((-1,-1,512))
+        labels_cmp = torch.cat((labels, prefix_sos), dim=1)
+        labels_match = (preds == labels_cmp) * (input != 0) * (labels_cmp != 0)
 
 
 
 
-        hidden_states = evaluator.model.trafo.encoder(embed, src_length_mask=mask, layer_id=-1)
+        # hidden_states = evaluator.model.trafo.encoder(embed, src_length_mask=mask, layer_id=-1)
+        hidden_states = evaluator.model.trafo.get_hidden_states(embed, src_length_mask=mask, is_lm=True)
 
 
     return hidden_states.detach()
@@ -134,17 +131,17 @@ def train(evaluator, classifier, dataset, optimizer, criterion, device='cpu', ev
 
         inputs = batch['in'].transpose(0,1).to(device)
         input_lengths = batch['in_len'].long().to(device)
-        labels = batch['labels'].long().to(device)
+        labels = batch['labels'].transpose(0,1).long().to(device)
         strings = batch['string']
         char_idxs = get_batch_char_idxs(strings)
-        hidden_states = get_final_hidden_state(evaluator, inputs, input_lengths)
+        hidden_states = get_final_hidden_state(evaluator, inputs, input_lengths, labels=labels, device=device)
 
         for row_idx, char_batch in enumerate(char_idxs):
             if char_batch:
                 for char_idx in char_batch:
-                    outputs = classifier(hidden_states[row_idx, char_idx])
+                    outputs = classifier(hidden_states[row_idx, char_idx]).unsqueeze(0)
 
-                    label = labels[row_idx][char_idx] - 5 # Hack shift 
+                    label = (labels[row_idx][char_idx] - 5).unsqueeze(0) # Hack shift 
                     loss = criterion(outputs, label)
 
                     loss.backward()  # Perform a single backward pass
@@ -166,10 +163,12 @@ def evaluate(evaluator, classifier, dataloader, criterion, device='cpu', visuali
 
     with torch.no_grad():  # Ensure no gradients are calculated
         for batch in tqdm(dataloader, desc="Evaluating"):
-            inputs, labels, strings = get_gpu_data(batch, device=device)
+            inputs = batch['in'].transpose(0,1).to(device)
+            input_lengths = batch['in_len'].long().to(device)
+            labels = batch['labels'].transpose(0,1).long().to(device)
+            strings = batch['string']
             char_idxs = get_batch_char_idxs(strings)
 
-            input_lengths = batch['in_len']
             hidden_states = get_final_hidden_state(evaluator, inputs, input_lengths)
 
             for row_idx, char_batch in enumerate(char_idxs):
