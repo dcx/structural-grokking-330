@@ -33,15 +33,16 @@ class LinearClassifier(nn.Module):
 class TwoLayerMLP(nn.Module):
     def __init__(self, hidden_size, num_classes, device='cpu'):
         super(TwoLayerMLP, self).__init__()
-        self.fc1 = nn.Linear(hidden_size, 512)
-        self.fc2 = nn.Linear(512, num_classes)
+        self.fc1 = nn.Linear(hidden_size, 2048)
+        self.fc2 = nn.Linear(2048, 2048)
+        self.fc3 = nn.Linear(2048, num_classes)
         self.relu = nn.ReLU()
         
         self.to(device)
 
     def forward(self, x):
-        x = self.relu(self.fc1(x))
-        return self.fc2(x)
+        x = self.relu(self.fc2(self.relu(self.fc1(x))))
+        return self.fc3(x)
 
 
 def get_final_hidden_state(evaluator, input_data, input_lengths, labels=None, device='cuda'):
@@ -51,23 +52,24 @@ def get_final_hidden_state(evaluator, input_data, input_lengths, labels=None, de
 
         mask = evaluator.model.generate_len_mask(max_len, input_lengths)
 
+        # # Test code
+        # input = input_data
+        # prefix_sos = (torch.ones((input.shape[0],1)).long() * evaluator.model.encoder_sos).to(device)
+        # input = torch.cat((prefix_sos, input), dim=1) # add SOS token
+        # input_lengths += 1
+        # outputs = evaluator.model(input, input_lengths)
+        # _, preds = torch.max(outputs['data'], dim=2)
 
-        input = input_data
-        prefix_sos = (torch.ones((input.shape[0],1)).long() * evaluator.model.encoder_sos).to(device)
-        input = torch.cat((prefix_sos, input), dim=1) # add SOS token
-        input_lengths += 1
-        outputs = evaluator.model(input, input_lengths)
-        _, preds = torch.max(outputs['data'], dim=2)
-
-        labels_cmp = torch.cat((labels, prefix_sos), dim=1)
-        labels_match = (preds == labels_cmp) * (input != 0) * (labels_cmp != 0)
-
-
+        # labels_cmp = torch.cat((labels, prefix_sos), dim=1)
+        # labels_match = (preds == labels_cmp) * (input != 0) * (labels_cmp != 0)
 
 
-        # hidden_states = evaluator.model.trafo.encoder(embed, src_length_mask=mask, layer_id=-1)
-        hidden_states = evaluator.model.trafo.get_hidden_states(embed, src_length_mask=mask, is_lm=True)
 
+
+        hidden_states = evaluator.model.encoder_only(input_data, mask, layer_id=-1)
+
+        
+        # hidden_states = evaluator.model.trafo.get_hidden_states(embed, src_length_mask=mask, is_lm=True)
 
     return hidden_states.detach()
     
@@ -125,7 +127,7 @@ def train(evaluator, classifier, dataset, optimizer, criterion, device='cpu', ev
 
     step = 0
     train_dataloader = get_dataloader(dataset['train'], collate_fn=collator, batch_size=64)
-
+    counts = {k: 0 for k in range(10)}
     for batch in tqdm(train_dataloader, desc="Training"):
         step += 1
 
@@ -139,9 +141,17 @@ def train(evaluator, classifier, dataset, optimizer, criterion, device='cpu', ev
         for row_idx, char_batch in enumerate(char_idxs):
             if char_batch:
                 for char_idx in char_batch:
-                    outputs = classifier(hidden_states[row_idx, char_idx]).unsqueeze(0)
 
-                    label = (labels[row_idx][char_idx] - 5).unsqueeze(0) # Hack shift 
+                    label = labels[row_idx][char_idx] - 5 # Hack shift 
+                    counts[int(label)] += 1
+
+
+                        
+
+
+                    outputs = classifier(hidden_states[row_idx, char_idx])
+
+                    
                     loss = criterion(outputs, label)
 
                     loss.backward()  # Perform a single backward pass
@@ -231,8 +241,10 @@ if __name__ == '__main__':
 
     classifier = TwoLayerMLP(512, 10, device=device)
 
-    criterion = torch.nn.CrossEntropyLoss() 
-    optimizer = torch.optim.SGD(classifier.parameters(), lr = 0.01)
+    weights = torch.tensor([0.1, 1, 1,1,1,1,1,1,1,1]).to(device)
+
+    criterion = torch.nn.CrossEntropyLoss(weight=weights) 
+    optimizer = torch.optim.Adam(classifier.parameters(), lr = 0.0001)
 
     for i in range(100):
         train(evaluator, classifier, dataset, optimizer, criterion, eval_steps=1000, device=device)
