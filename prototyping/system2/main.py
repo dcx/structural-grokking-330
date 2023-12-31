@@ -15,20 +15,20 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 16,
+    'bs': 32,
     'num_workers': 8,
     'pad_token_id': 30,
 
     # dataset
-    'csv_file': 'prototyping/system2-data/test-5k-6-8.csv',
+    'csv_file': '/storygen/amlif-data/amlif-50k.csv',
     'use_cur_action': True,
     'use_cur_action_result': True,
     'use_next_action': True,
-    'val_check_interval': 100, # in steps
+    'val_check_interval': 300, # in steps
     'holdout_trees_frac': 0.15,
     'train_frac': 0.99,
     'val_frac': 0.01, # currently ignored
-    'test_max_items': 2000,     
+    'test_max_items': 2500,     
 }
 # reminder: unlike main framework, here we are plugging test into val
 # because Lightning (correctly) doesn't have a test step during training
