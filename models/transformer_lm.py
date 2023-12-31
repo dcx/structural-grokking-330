@@ -27,8 +27,9 @@ class TransformerResult(DotDict):
 class TransformerLM(torch.nn.Module):
     def __init__(
         self,
-        n_input_tokens: int,
-        state_size: int = 512,
+        n_input_tokens: int,  # in_vocab_size
+        state_size: int = 512,  # vec_dim
+        n_heads: int = 8, # n_heads
         ff_multiplier: float = 1,
         max_len: int = 5000,
         transformer=Transformer,
@@ -58,6 +59,7 @@ class TransformerLM(torch.nn.Module):
         self.encoder_sos = n_input_tokens + 1 if encoder_sos else None
         self.state_size = state_size
         self.embedding_init = embedding_init
+        self.n_heads = n_heads
         self.ff_multiplier = ff_multiplier
         self.n_input_tokens = n_input_tokens
         self.scale_mode = scale_mode
@@ -90,6 +92,7 @@ class TransformerLM(torch.nn.Module):
 
         self.trafo = transformer(
             d_model=self.state_size,
+            nhead=self.n_heads,
             dim_feedforward=int(self.ff_multiplier * self.state_size),
             **kwargs
         )
