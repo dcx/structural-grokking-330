@@ -77,17 +77,6 @@ class AddMultLetInterpreter(lark.visitors.Interpreter):
         n = int(tree.children[0].value)
         return (n, '_')
 
-parser = lark.Lark(calc_grammar, start='expr')
-interpreter = AddMultLetInterpreter()
-
-testexp = "(L[x4](+x2))" # x=4, x+2
-testexp = "(L [x4] (L [y(+1(*2x))] (*y3)) )" # x=4, y=2x+1, 3y
-
-testexp = testexp.replace(" ", "") # whitespace is for humans
-testtree = parser.parse(testexp)
-testans = interpreter.visit(testtree)
-print(testans)
-
 
 def get_height(tree):
     "Get the height of a Lark tree (height 1 = single digit)"
@@ -103,8 +92,11 @@ def make_data(out_file, n_examples, min_height, max_height, max_ans):
     - n_examples: how many examples to generate in total
     - min_height: minimum height of the generated examples
     - max_height: maximum height of the generated examples
-    - exclude_strings: if not None, separate out examples that contain one of these strings
-    - exclude_file: Write the excluded examples to this file
+    - max_ans: maximum non mod-10 value the examples are allowed to have
+               rationale: we record both actual and mod-10 answer, and very big
+               numbers will cause overflow errors)
+    - FUTURE: exclude_strings: if not None, separate out examples that contain one of these strings
+    - FUTURE: exclude_file: Write the excluded examples to this file
     """
 
     parser = lark.Lark(calc_grammar, start='expr')
@@ -170,6 +162,21 @@ def merge_csvs(in_files, out_file):
 
 if __name__ == '__main__':
 
+    # little test run
+    run_quick_test = False
+    if run_quick_test:
+        parser = lark.Lark(calc_grammar, start='expr')
+        interpreter = AddMultLetInterpreter()
+
+        testexp = "(L[x4](+x2))" # x=4, x+2
+        testexp = "(L [x4] (L [y(+1(*2x))] (*y3)) )" # x=4, y=2x+1, 3y
+
+        testexp = testexp.replace(" ", "") # whitespace is for humans
+        testtree = parser.parse(testexp)
+        testans = interpreter.visit(testtree)
+        print(testans)
+
+    # main run
     n_items = 1500000
     n_processes = 8
     processes = []

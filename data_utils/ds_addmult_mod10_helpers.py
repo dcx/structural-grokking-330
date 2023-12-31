@@ -199,38 +199,42 @@ def eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=32, ha
             collate_fn=eval_data_collator,
         )
 
-        for batch in tqdm(eval_dataloader):
-            # Move tensors to the same device as the model
-            device = next(model.parameters()).device
-            input = batch['in'].transpose(0,1).to(device)
-            input_len = batch['in_len'].long().to(device)
-            label = batch['labels'].long().to(device)
+        with open(dump_file_path, 'w') as dump_file:
 
-            # Get the model's predictions
-            if has_token_labels: # TransformerLM
-                prefix_sos = (torch.ones((input.shape[0],1)).long() * model.encoder_sos).to(device)
-                input = torch.cat((prefix_sos, input), dim=1) # add SOS token
-                input_len += 1
+            for batch in tqdm(eval_dataloader):
+                # Move tensors to the same device as the model
+                device = next(model.parameters()).device
+                input = batch['in'].transpose(0,1).to(device)
+                input_len = batch['in_len'].long().to(device)
+                label = batch['labels'].long().to(device)
 
-                outputs = model(input, input_len)
-                _, preds = torch.max(outputs['data'], dim=2)
+                # Get the model's predictions
+                if has_token_labels: # TransformerLM
+                    prefix_sos = (torch.ones((input.shape[0],1)).long() * model.encoder_sos).to(device)
+                    input = torch.cat((prefix_sos, input), dim=1) # add SOS token
+                    input_len += 1
 
-                labels_cmp = torch.cat((label.T, prefix_sos), dim=1)
-                labels_match = (preds == labels_cmp) * (input != 0) * (labels_cmp != 0)
+                    outputs = model(input, input_len)
+                    _, preds = torch.max(outputs['data'], dim=2)
 
-                # Update accuracy counters
-                total_count += batch['labels_len'].sum().item()
-                correct_count += labels_match.sum().item()
+                    labels_cmp = torch.cat((label.T, prefix_sos), dim=1)
+                    labels_match = (preds == labels_cmp) * (input != 0) * (labels_cmp != 0)
 
-            else: # EncDec
-                outputs = model(input, input_len, None, None, None)
-                _, predicted_class = torch.max(outputs, dim=1)
-                # Update accuracy counters
-                total_count += label.size(0)
-                correct_count += (predicted_class == label).sum().item()
+                    # Update accuracy counters
+                    total_count += batch['labels_len'].sum().item()
+                    correct_count += labels_match.sum().item()
 
-                if (dump):
-                    with open(dump_file_path, 'w') as dump_file:
+                    if (dump):
+                        raise NotImplementedError("eval_callback_mod10 is unable to dump to file when 'has_token_labels' is set")
+
+                else: # EncDec
+                    outputs = model(input, input_len, None, None, None)
+                    _, predicted_class = torch.max(outputs, dim=1)
+                    # Update accuracy counters
+                    total_count += label.size(0)
+                    correct_count += (predicted_class == label).sum().item()
+
+                    if (dump):
                         strings = batch['string']
                         label = label.cpu().numpy()
                         predicted_class = predicted_class.cpu().numpy()
