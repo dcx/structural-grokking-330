@@ -118,7 +118,8 @@ def make_data(out_file, n_examples, min_height, max_height, max_ans):
             else:
                 try:
                     answer, ans_inter = interpreter.visit(parser.parse(example))
-                except:
+                except Exception as e:
+                    print(f'Suppressed exception in ds-addmult-let.py: {e}')
                     continue
                 if answer > max_ans:
                     continue
