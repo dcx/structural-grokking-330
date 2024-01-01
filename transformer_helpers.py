@@ -54,12 +54,12 @@ def create_model(
 
 
 def create_model_interface(
-    model, label_smoothing=0.0, is_null_encoder=False, is_lm=False
+    model, label_smoothing=0.0, is_null_encoder=False, is_lm=False, has_token_labels=False
 ):
     if is_null_encoder:
         return TransformerDecOnlyInterface(model, label_smoothing=label_smoothing)
     elif is_lm:
-        return TransformerLMInterface(model, label_smoothing=label_smoothing)
+        return TransformerLMInterface(model, label_smoothing=label_smoothing, has_token_labels=has_token_labels)
     else:
         return TransformerEncDecInterface(model, label_smoothing=label_smoothing)
 

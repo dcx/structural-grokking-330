@@ -9,9 +9,10 @@ import layers
 
 
 class TransformerLMInterface(ModelInterface):
-    def __init__(self, model: torch.nn.Module, label_smoothing: float = 0.0):
+    def __init__(self, model: torch.nn.Module, label_smoothing: float = 0.0, has_token_labels: bool = False):
         self.model = model
         self.label_smoothing = label_smoothing
+        self.has_token_labels = has_token_labels
 
     def loss(
         self,
@@ -20,8 +21,10 @@ class TransformerLMInterface(ModelInterface):
         mask: torch.Tensor,
         normalize,
     ) -> torch.Tensor:
-        l = layers.cross_entropy(
-            outputs.data, ref, reduction="none", smoothing=self.label_smoothing
+        l = layers.cross_entropy( 
+            # TODO: Set the ignore_index in a cleaner way 
+            # (e.g. linked to Vocabulary settings)
+            outputs.data, ref, reduction="none", smoothing=self.label_smoothing, ignore_index=0
         )
         l = l.reshape_as(ref) * mask
         if normalize:
@@ -46,8 +49,10 @@ class TransformerLMInterface(ModelInterface):
             dim=0,
         ).transpose(0, 1)
 
+        labels_key = "in" if not self.has_token_labels else "labels"
+
         out_data = add_eos(
-            data["in"], data["in_len"], self.model.encoder_eos
+            data[labels_key], data["in_len"], self.model.encoder_eos
         ).transpose(0, 1)
 
         # inp_data =  bs x seq_len: [SOS] a b c

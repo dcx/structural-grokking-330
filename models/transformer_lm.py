@@ -38,6 +38,7 @@ class TransformerLM(torch.nn.Module):
         encoder_sos: bool = True,
         embedding_init: str = "pytorch",
         scale_mode: str = "none",
+        use_token_labels: bool = False,
         **kwargs
     ):
         """
