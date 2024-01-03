@@ -173,35 +173,6 @@ def get_datasets_and_vocab(args, language_model: bool):
     return datasets, in_vocab
 
 
-def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
-    """
-    Returns the appropriate callback function based on the dataset type specified in args.
-
-    Args:
-        args: Command line arguments.
-        language_model (bool): Flag to determine if it's a language model.
-        model: The trained model.
-        in_vocab (CharVocabulary): Input vocabulary.
-        datasets: The datasets used for training and evaluation.
-
-    Returns:
-        function: The corresponding callback function.
-    """
-    if not args.callback:
-        return None
-
-    dataset_callbacks = {
-        "lm": lambda split: eval_lm_callback(model, in_vocab, split),
-        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
-        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model and not args.lm_with_token_labels else \
-                eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval, has_token_labels=args.lm_with_token_labels)
-    }
-
-    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
-
-
 def main_lm(args):
     """
     Main function for language modeling tasks.
