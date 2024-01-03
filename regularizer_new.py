@@ -16,7 +16,24 @@ from time import time
 
 class Chart():
     def __init__(self, sim_metric, tokenizer, spaces, hinge_const, dataset, 
-                 sample_num = -1, sample_len = 8, depth_limit=-1, single = False, diff = False, gumbel = False, linear=False):
+                 sample_num = -1, sample_len = 8, single = False, diff = False, gumbel = False, linear=False):
+        """
+        Initialize the SCI score chart.
+
+        Args:
+            sim_metric: Distance metric for similarity calculation.
+            tokenizer: Tokenizer object.
+            spaces: Words in all datasets other than SimPL are space-separated. Set to False for SimPL.
+            hinge_const: If hinge loss is used, maximum desired SCI score at any tree node.
+            dataset: Current dataset.
+            sample_num: If not -1, number of phrases sampled from each input sentence.
+            sample_len: Maximum length of phrases sampled.
+            single: If enabled, regularize only on decision for top-level split.
+            diff: If enabled, SCI score computation is done in difference mode (span embedding = embedding of last token - embedding of token before first token)
+            gumbel: If enabled, use gumbel softmax in computation of SCI score.
+            linear: Shikhar's linear time tree regularization idea.
+        """
+        
         # Initialize the SCI chart
         self.sim_metric = sim_metric
 
@@ -33,16 +50,11 @@ class Chart():
         self.sample_num = sample_num
         self.sample_len = sample_len
 
-        # depth limited version of regularizer: computation only for last d layers of Chart
-        self.depth_limit = depth_limit
-
-        # linear pass idea
+        # linear pass idea (Shikhar)
         self.linear = linear
 
-        # try out top-layer decision idea
+        # top-layer decision idea
         self.single = single
-
-        # R2D2 optimizations for CKY parsing
 
     def relax_cond(self, mask, relax_mask, start_relax_layer, num_layers):
         ### relax mask only masks padded stuff
@@ -62,9 +74,10 @@ class Chart():
         return self._cache[input_str]
     
     def get_phrases(self, str):
+        # Sample phrases from given string
         phrases = set()
 
-        # Guaranteed that str is larger than phrase len
+        # It is guaranteed that str is larger than phrase len
         for iter in range(self.sample_num):
             if (self.dataset in ["ds-addmult-mod10", "dyck"]):
                 # ensure phrases are the largest nested subtree
@@ -105,7 +118,7 @@ class Chart():
                     if (self.dataset == "dyck"):
                         str = " ".join(str)
                     continue
-                # allow some relaxation in subtree length, as most samplings will be small
+                # allow some relaxation in phrase length, as most well-formed phrases will be small
                 if (end_brack - start_brack > 2*self.sample_len):
                     if (self.dataset == "dyck"):
                         str = " ".join(str)
@@ -117,7 +130,7 @@ class Chart():
                     phrase = str[start_brack : end_brack + 1]
                 phrases.add(phrase)
             else:
-                # simple sampling
+                # simple sampling (phrases are random spans in the input)
                 split_str = str.split(" ")
                 start = randint(0, len(split_str) - self.sample_len - 1)
                 phrase = " ".join(split_str[start : start + self.sample_len + 1])
@@ -140,12 +153,12 @@ class Chart():
             for str in outer_input:
                 if (self.dataset in ["ds-addmult-mod10"]):
                     if (len(str) <= self.sample_len):
-                        # Don't sample
+                        # No need for sampling, sentence is smaller than max phrase length
                         curr_str =  [str]
                     else:
                         curr_str = self.get_phrases(str)
                     if (use_gold and self.single):
-                        # Trim the useless stuff
+                        # In regularization based on gold parses, brackets and operators are stripped.
                         for sampled in curr_str:
                             sampled_input.append(sampled[2:-1])
                     else:
@@ -153,7 +166,7 @@ class Chart():
                 else:
                     split_str = str.split(" ")
                     if (len(split_str) <= self.sample_len):
-                        # Don't sample
+                        # No need for sampling, sentence is smaller than max phrase length
                         sampled_input += [str]
                     else:
                         sampled_input += self.get_phrases(str)
@@ -165,8 +178,6 @@ class Chart():
                     sampled_input.append(str)
                 outer_input = sampled_input
 
-        # print(outer_input)
-
         # Init SCI chart
         if (not batch and self.sample_num == -1):
             scores = {}
@@ -177,13 +188,12 @@ class Chart():
 
     def build_scores(self, input_str, model, start_relax_layer, tqdm_disable=True, parse_splits=None, batch=True, use_gold=False):
         # Build SCI chart
+        # use_gold: Tree regularization guided by gold parses
         if batch:
             scores = [{} for _ in input_str]
         else:
             scores = {}
         device = torch.device("cuda")
-        # Required for testing
-        # model.to(device)
         if (type(model) != torch.nn.Module):
             curr_model = model.model
         else:
@@ -318,7 +328,10 @@ class Chart():
         return scores, outer_input
 
     def get_score(self, score_chart, tau=1, mean=True, input_str=None, use_gold=False, print_parse=False):
-
+        # Compute tree regularization scores
+        # print_parse: when enabled, print subtrees after every split decision.
+        # tau: Temparature for gumbel softmax.
+        # mean: Expectation approximation using mean of scores.
         def recurse(score_chart, curr_str, st, en):
             if (st == en):
                 return 0
@@ -332,7 +345,7 @@ class Chart():
                     if (print_parse):
                         print(curr_phrase)
                     if (len(curr_phrase) <= 5):
-                        # depth 1 subexpression, don't really need to enforce
+                        # depth 1 subexpression, don't need to enforce
                         return 0
                     # atleast one non-trivial bracket left
                     if (curr_phrase[2] == '('):
@@ -359,7 +372,6 @@ class Chart():
                     s1 = recurse(score_chart, curr_str, st+2, st+end_brack)
                     s2 = recurse(score_chart, curr_str, st + end_brack + 1, en-1)
                     
-                    # try mean instead? closer to expectation
                     if mean:
                         norm_score = chart[(st+2, st+end_brack)] + chart[(st + end_brack + 1, en-1)] - (tot_score/(en-st-3))
                     else:
@@ -374,11 +386,13 @@ class Chart():
                     
                     scores = torch.tensor(scores, requires_grad = True, dtype = torch.float).to(device)
                     if (self.gumbel):
-                        softmaxed = F.gumbel_softmax(scores, tau=tau, hard=True) # can schedule tau
+                        # Soft split decision
+                        softmaxed = F.gumbel_softmax(scores, tau=tau, hard=True)
                         best = (torch.argmax(softmaxed) + st).item()
                         best_score = torch.sum(softmaxed*scores)
                         tot_score = torch.sum(scores)
                     else:
+                        # Greedy split decision
                         best = (torch.argmax(scores) + st).item()
                         best_score = torch.max(scores)
                         tot_score = torch.sum(scores)
@@ -393,7 +407,6 @@ class Chart():
                     s1 = recurse(score_chart, curr_str, st, best)
                     s2 = recurse(score_chart, curr_str, best+1, en)
                     
-                    # try mean instead? closer to expectation
                     if mean:
                         norm_score = best_score - (tot_score/(en-st))
                     else:
@@ -407,17 +420,17 @@ class Chart():
         device = torch.device("cuda")
         for idx, chart in enumerate(score_chart):
             end = max([key[1] for key in chart])
-            # print(chart)
             curr_str = input_str[idx]
             if (print_parse):
                 print(curr_str)
             if (self.single):
+                # Only root-level decision
                 if use_gold:
                     # enforce LR parsing (addmult only)
                     curr_phrase = curr_str
                     # print(curr_phrase)
                     if (len(curr_phrase) <= 2):
-                        # depth 1 subexpression, don't really need to enforce
+                        # depth 1 subexpression, don't need to enforce
                         score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)
                         scores.append(score.float())
                         continue
@@ -443,7 +456,6 @@ class Chart():
                         cand_score = chart[(0,k)] + chart[(k+1,end)]
                         tot_score += cand_score
                     
-                    # try mean instead? closer to expectation
                     if mean:
                         norm_score = chart[(0, end_brack)] + chart[(end_brack + 1, end)] - (tot_score/end)
                     else:
@@ -451,7 +463,7 @@ class Chart():
                         norm_score = chart[(0, end_brack)] + chart[(end_brack + 1, end)] - chart[(0,k_rand)] - chart[(k_rand+1,end)]
                 else:
                     if (len(curr_str) <= 1):
-                        # depth 1 subexpression, don't really need to enforce
+                        # depth 1 subexpression, don't need to enforce
                         score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)
                         scores.append(score.float())
                         continue
@@ -474,6 +486,7 @@ class Chart():
                         norm_score = best_score - chart[(0,k_rand)] - chart[(k_rand+1,end)]
                 score = norm_score
             else:
+                # Run normal computation
                 score = recurse(chart, curr_str, 0, end)
             if (score == 0):
                 score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)

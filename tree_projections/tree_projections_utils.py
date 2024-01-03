@@ -239,11 +239,13 @@ def get_all_hidden_states_scratch(
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
                     if is_lm:
                         if (diff):
+                            # Difference-based SCI score computation
                             hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                         else:
                             hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
                     else:
                         if (diff):
+                            # Difference-based SCI score computation
                             hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                         else:
                             hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]

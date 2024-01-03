@@ -173,21 +173,6 @@ def get_datasets_and_vocab(args, language_model: bool):
     return datasets, in_vocab
 
 
-def main_lm(args):
-    """
-    Main function for language modeling tasks.
-
-    Args:
-        args: Command line arguments.
-    """
-    language_model = args.lm
-    out_vocab = CharVocabulary(chars=set('0123456789'))
-
-    datasets, in_vocab = get_datasets_and_vocab(args, language_model)
-
-    return datasets, in_vocab
-
-
 def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
     """
     Returns the appropriate callback function based on the dataset type specified in args.

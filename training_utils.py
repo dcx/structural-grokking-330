@@ -264,6 +264,7 @@ def train_loop(
 
                 # Tree regularizer!
                 if num_steps % regularizer_steps == 0:
+                    # Linear scheduling for gumbel softmax temperature tau
                     tau = tau_init + tau_step * num_steps
                     if (regularizer is not None):
                         if (regularize_all):
@@ -276,6 +277,7 @@ def train_loop(
                             sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold, tau=tau)
                         # print(sci_scores)
                         if (use_linear):
+                            # Shikhar's linear time idea
                             fin_sci_score = torch.mean(torch.stack([torch.abs(_) for _ in sci_scores]))
                             sci_loss = regularizer_rel_wt * fin_sci_score
                         else:
@@ -283,6 +285,7 @@ def train_loop(
                             sci_loss = -regularizer_rel_wt * fin_sci_score
                         sci_loss.backward()
                         if compute_dot:
+                            # Dot products between tree reg gradients and task loss gradients
                             parameters = [
                                 p for p in model.model.parameters() if p.requires_grad
                             ]
@@ -305,6 +308,7 @@ def train_loop(
                 loss_curr /= accum_steps
                 loss_curr.backward()
                 if compute_dot:
+                    # Dot products between tree reg gradients and task loss gradients
                     parameters = [
                         p for p in model.model.parameters() if p.requires_grad
                     ]
@@ -364,7 +368,7 @@ def train_loop(
 
                     # Save model if save_dir and save_interval has been hit
                     if (save_model and save_interval == 0):
-                        # Always save to same directory
+                        # Always save to same file [AN, I find this more convenient for my runs]
                         if num_steps % 100000 == 0:
                             save_path = f"{os.path.join(save_dir, 'state')}.pt"
                             torch.save(model.model.state_dict(), save_path)
@@ -437,6 +441,7 @@ def reg_loop(
     tokenizer=None,
     regularizer=None
 ):
+    # Quick hack to get tree regularization scores for a saved model
     num_steps = 0
     train_batch_size = args.batch_size
     use_gold = args.use_gold
