@@ -221,7 +221,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('/storygen/amlif-data/amlif-50k.csv', 30000, min_height=6, max_height=8, n_processes=20, stepwise=True)
+    make_data_mp('prototyping/system2/amlif-data-nostep/amlif-50k.csv', 30000, min_height=6, max_height=8, n_processes=20, stepwise=False)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')

@@ -15,12 +15,12 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 32,
-    'num_workers': 8,
+    'bs': 2,
+    'num_workers': 1,
     'pad_token_id': 30,
 
     # dataset
-    'csv_file': '/storygen/amlif-data/amlif-50k.csv',
+    'csv_file': 'data/amlif-data/amlif-50k.csv',
     'use_cur_action': True,
     'use_cur_action_result': True,
     'use_next_action': True,
@@ -72,6 +72,9 @@ basic_model = model.PlanTransformer(**hparams['model_hparams'])
 # training
 trainer = L.Trainer(logger=wandb_logger, val_check_interval=hparams['val_check_interval'])
 trainer.fit(basic_model, dl_train, dl_test)
+
+
+
 
 
 
