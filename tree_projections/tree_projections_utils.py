@@ -177,7 +177,7 @@ def get_all_hidden_states_scratch(
     batch_size = 256
     st = 0
 
-    if(diff):
+    if diff:
         # Flatten slice dict
         list_slice_dict = []
         for list_slice in slice_dict:
@@ -199,7 +199,7 @@ def get_all_hidden_states_scratch(
         while st < len(input_list):
             en = min(len(input_list), st + batch_size)
             cslice = input_list[st:en]
-            if (diff):
+            if diff:
                 cslice_dict = list_slice_dict[st:en]
             inputs, input_lens = tokenizer_helper(cslice)
             inputs = inputs.to(device)
@@ -238,13 +238,13 @@ def get_all_hidden_states_scratch(
                     # the first thing is the [CLS] or [start id] which we ignore
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
                     if is_lm:
-                        if (diff):
+                        if diff:
                             # Difference-based SCI score computation
                             hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                         else:
                             hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
                     else:
-                        if (diff):
+                        if diff:
                             # Difference-based SCI score computation
                             hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                         else:

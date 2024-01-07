@@ -184,6 +184,18 @@ def eval_callback(
     )
     return best_accs, curr_accs
 
+def get_grads(model):
+    parameters = [
+        p for p in model.model.parameters() if p.requires_grad
+    ]
+    curr_grads = []
+    for p in parameters:
+        if (p.grad == None):
+            curr_grads.append(None)
+        else:
+            param = p.grad.cpu().data
+            curr_grads.append(param)
+    return curr_grads
 
 def train_loop(
     args,
@@ -286,16 +298,7 @@ def train_loop(
                         sci_loss.backward()
                         if compute_dot:
                             # Dot products between tree reg gradients and task loss gradients
-                            parameters = [
-                                p for p in model.model.parameters() if p.requires_grad
-                            ]
-                            sci_grads = []
-                            for p in parameters:
-                                if (p.grad == None):
-                                    sci_grads.append(None)
-                                else:
-                                    param = p.grad.cpu().data
-                                    sci_grads.append(param)
+                            sci_grads = get_grads(model)
                             model.model.zero_grad()
                         accum_strings = []
                         regularizer_steps_decay += 1
@@ -309,16 +312,7 @@ def train_loop(
                 loss_curr.backward()
                 if compute_dot:
                     # Dot products between tree reg gradients and task loss gradients
-                    parameters = [
-                        p for p in model.model.parameters() if p.requires_grad
-                    ]
-                    loss_grads = []
-                    for p in parameters:
-                        if (p.grad == None):
-                            loss_grads.append(None)
-                        else:
-                            param = p.grad.cpu().data
-                            loss_grads.append(param)
+                    loss_grads = get_grads(model)
                     avg_dot = 0
                     for idx in range(len(loss_grads)):
                         if (loss_grads[idx] is not None and sci_grads[idx] is not None):
@@ -441,7 +435,21 @@ def reg_loop(
     tokenizer=None,
     regularizer=None
 ):
-    # Quick hack to get tree regularization scores for a saved model
+    '''
+    Quick hack to get tree regularization scores for a saved model on any dataset. 
+    Prints tree regularization scores for each batch, and the average score over all batches. 
+
+    Args:
+        args: Command line arguments.
+        model: The trained model.
+        train_dataset: Dataset for which tree regularization scores are required.
+        device: Device on which score computation will take place.
+        tokenizer: Input vocabulary.
+        regularizer: Initialized tree regularizer object.
+
+    Returns:
+        None
+    '''
     num_steps = 0
     train_batch_size = args.batch_size
     use_gold = args.use_gold
@@ -493,7 +501,6 @@ def reg_loop(
                     fin_sci_score = torch.mean(torch.stack(sci_scores))
                     all_sci_scores.append(fin_sci_score.item())
                     print(fin_sci_score)
-    print(all_sci_scores)
     print(sum(all_sci_scores)/len(all_sci_scores))
 
         

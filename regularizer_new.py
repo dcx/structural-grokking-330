@@ -82,52 +82,47 @@ class Chart():
             if (self.dataset in ["ds-addmult-mod10", "dyck"]):
                 # ensure phrases are the largest nested subtree
                 if (self.dataset == "dyck"):
-                    str = str.split(" ")
-                start = randint(0, len(str) - self.sample_len - 1)
+                    curr_str = str.split(" ")
+                else:
+                    curr_str = str
+                start = randint(0, len(curr_str) - self.sample_len - 1)
                 start_brack = -1
-                for pos in range(start, len(str)):
+                for pos in range(start, len(curr_str)):
                     if (self.dataset == "dyck"):
-                        if (str[pos][0] == '('):
+                        if (curr_str[pos][0] == '('):
                             start_brack = pos
                             break
                     else:
-                        if (str[pos] == '('):
+                        if (curr_str[pos] == '('):
                             start_brack = pos
                             break
                 if (start_brack == -1):
-                    if (self.dataset == "dyck"):
-                        str = " ".join(str)
                     continue
                 depth = 0
                 end_brack = -1
-                for pos in range(start_brack, len(str)):
+                for pos in range(start_brack, len(curr_str)):
                     if (self.dataset == "dyck"):
-                        if (str[pos][0] == '('):
+                        if (curr_str[pos][0] == '('):
                             depth += 1
-                        elif (str[pos][-1] == ')'):
+                        elif (curr_str[pos][-1] == ')'):
                             depth -= 1
                     else:
-                        if (str[pos] == '('):
+                        if (curr_str[pos] == '('):
                             depth += 1
-                        elif (str[pos] == ')'):
+                        elif (curr_str[pos] == ')'):
                             depth -= 1
                     if (depth == 0):
                         end_brack = pos
                         break
                 if (end_brack == -1):
-                    if (self.dataset == "dyck"):
-                        str = " ".join(str)
                     continue
                 # allow some relaxation in phrase length, as most well-formed phrases will be small
                 if (end_brack - start_brack > 2*self.sample_len):
-                    if (self.dataset == "dyck"):
-                        str = " ".join(str)
                     continue
                 if (self.dataset == "dyck"):
-                    phrase = " ".join(str[start : start + self.sample_len + 1])
-                    str = " ".join(str)
+                    phrase = " ".join(curr_str[start : start + self.sample_len + 1])
                 else:
-                    phrase = str[start_brack : end_brack + 1]
+                    phrase = curr_str[start_brack : end_brack + 1]
                 phrases.add(phrase)
             else:
                 # simple sampling (phrases are random spans in the input)
@@ -185,10 +180,36 @@ class Chart():
             scores = [{} for _ in outer_input]
 
         return outer_input, scores
+    
+    def get_fully_contextual_vectors(self, all_vector_idxs, st, en):
+        # Get in-context span representations
+        if (self.diff):
+            if (st == 0):
+                fully_contextual_vectors = all_vector_idxs[en]
+            else:
+                fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st-1]
+            fully_contextual_vectors = fully_contextual_vectors.squeeze()
+        elif (self.linear):
+            fully_contextual_vectors = all_vector_idxs[st : en + 1].mean(
+                axis=0
+            )
+        else:
+            fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
+                axis=0
+            )
+        return fully_contextual_vectors
 
     def build_scores(self, input_str, model, start_relax_layer, tqdm_disable=True, parse_splits=None, batch=True, use_gold=False):
         # Build SCI chart
         # use_gold: Tree regularization guided by gold parses
+
+        def tokenizer_helper(s, add_special_tokens=True):
+            # Wrapper to handle LM SOS
+            if add_special_tokens:
+                return [curr_model.encoder_sos] + self.tokenizer(s)
+            else:
+                return self.tokenizer(s)
+            
         if batch:
             scores = [{} for _ in input_str]
         else:
@@ -198,13 +219,6 @@ class Chart():
             curr_model = model.model
         else:
             curr_model = model
-
-        def tokenizer_helper(s, add_special_tokens=True):
-            # Wrapper to handle LM SOS
-            if add_special_tokens:
-                return [curr_model.encoder_sos] + self.tokenizer(s)
-            else:
-                return self.tokenizer(s)
 
         outer_input, scores = self.phrase_split(input_str, batch, use_gold)
 
@@ -246,7 +260,7 @@ class Chart():
                 pre_tokenized_construct[1] += [batch_idxs[_]] * num_req
             pre_tokenized_construct = tuple(pre_tokenized_construct)
 
-            if (not self.linear):
+            if not self.linear:
                 inner_context_vecs = get_all_hidden_states_scratch(
                                 curr_model,
                                 tokenizer_helper,
@@ -268,20 +282,7 @@ class Chart():
             for idx, key in slice_dict[0]:
                 st, en = key
 
-                if (self.diff):
-                    if (st == 0):
-                        fully_contextual_vectors = all_vector_idxs[en]
-                    else:
-                        fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st-1]
-                    fully_contextual_vectors = fully_contextual_vectors.squeeze()
-                elif (self.linear):
-                    fully_contextual_vectors = all_vector_idxs[st : en + 1].mean(
-                        axis=0
-                    )
-                else:
-                    fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
-                        axis=0
-                    )
+                fully_contextual_vectors = self.get_fully_contextual_vectors(all_vector_idxs, st, en)
                 if (self.linear):
                     if (st == 0):
                         scores[key] = 0
@@ -299,20 +300,7 @@ class Chart():
                 for idx, key in slice_dict[str_idx]:
                     st, en = key
 
-                    if (self.diff):
-                        if (st == 0):
-                            fully_contextual_vectors = all_vector_idxs[en]
-                        else:
-                            fully_contextual_vectors = all_vector_idxs[en] - all_vector_idxs[st-1]
-                        fully_contextual_vectors = fully_contextual_vectors.squeeze()
-                    elif (self.linear):
-                        fully_contextual_vectors = all_vector_idxs[st : en + 1].mean(
-                            axis=0
-                        )
-                    else:
-                        fully_contextual_vectors = all_vector_idxs[st : en + 1].sum(
-                            axis=0
-                        )
+                    fully_contextual_vectors = self.get_fully_contextual_vectors(all_vector_idxs, st, en)
                     if (self.linear):
                         if (st == 0):
                             scores[str_idx][key] = 0
@@ -327,94 +315,96 @@ class Chart():
 
         return scores, outer_input
 
+    def recurse(self, chart, curr_str, st, en, tau, mean, use_gold, print_parse, device):
+        # Helper for tree regularization score computation
+        if (st == en):
+            return 0
+        else:
+            if (use_gold):
+                # enforce LR parsing (addmult only)
+                if (len(curr_str) == 3):
+                    # single digit
+                    return 0
+                curr_phrase = curr_str[st : en+1]
+                if (print_parse):
+                    print(curr_phrase)
+                if (len(curr_phrase) <= 5):
+                    # depth 1 subexpression, don't need to enforce
+                    return 0
+                # atleast one non-trivial bracket left
+                if (curr_phrase[2] == '('):
+                    # (+(...)...)
+                    end_brack = -1
+                    enc = 1
+                    for idx in range(3,len(curr_phrase)):
+                        if (curr_phrase[idx] == ')'):
+                            end_brack = idx
+                            enc -= 1
+                        elif (curr_phrase[idx] == '('):
+                            enc += 1
+                        if (enc == 0):
+                            break
+                else:
+                    # (+d(...))
+                    end_brack = 2
+
+                tot_score = 0
+                for k in range(st+2, en-1):
+                    cand_score = chart[(st+2,k)] + chart[(k+1,en-1)]
+                    tot_score += cand_score
+
+                s1 = self.recurse(chart, curr_str, st+2, st+end_brack, tau, mean, use_gold, print_parse, device)
+                s2 = self.recurse(chart, curr_str, st + end_brack + 1, en-1, tau, mean, use_gold, print_parse, device)
+                
+                if mean:
+                    norm_score = chart[(st+2, st+end_brack)] + chart[(st + end_brack + 1, en-1)] - (tot_score/(en-st-3))
+                else:
+                    k_rand = randint(st+2, en-3)
+                    norm_score = chart[(st+2, st+end_brack)] + chart[(st + end_brack + 1, en-1)] - chart[(st+2,k_rand)] - chart[(k_rand+1,en-2)]
+            else:
+                # Normal computation
+                scores = []
+                for k in range(st, en):
+                    cand_score = chart[(st,k)] + chart[(k+1,en)]
+                    scores.append(cand_score)
+                
+                scores = torch.tensor(scores, requires_grad = True, dtype = torch.float).to(device)
+                if (self.gumbel):
+                    # Soft split decision
+                    softmaxed = F.gumbel_softmax(scores, tau=tau, hard=True)
+                    best = (torch.argmax(softmaxed) + st).item()
+                    best_score = torch.sum(softmaxed*scores)
+                    tot_score = torch.sum(scores)
+                else:
+                    # Greedy split decision
+                    best = (torch.argmax(scores) + st).item()
+                    best_score = torch.max(scores)
+                    tot_score = torch.sum(scores)
+
+                if (print_parse):
+                    if (self.spaces):
+                        word_list = curr_str.split(" ")
+                        print((" ").join(word_list[st:best+1]), (" ").join(word_list[best+1:en]))
+                    else:
+                        print(curr_str[st:best+1], curr_str[best+1:en])
+
+                s1 = self.recurse(chart, curr_str, st, best, tau, mean, use_gold, print_parse, device)
+                s2 = self.recurse(chart, curr_str, best+1, en, tau, mean, use_gold, print_parse, device)
+                
+                if mean:
+                    norm_score = best_score - (tot_score/(en-st))
+                else:
+                    k_rand = randint(st, en-1)
+                    norm_score = best_score - chart[(st,k_rand)] - chart[(k_rand+1,en)]
+
+            norm_score = min(norm_score, self.hinge_const)
+            return s1 + s2 + norm_score
+
     def get_score(self, score_chart, tau=1, mean=True, input_str=None, use_gold=False, print_parse=False):
         # Compute tree regularization scores
         # print_parse: when enabled, print subtrees after every split decision.
         # tau: Temparature for gumbel softmax.
         # mean: Expectation approximation using mean of scores.
-        def recurse(score_chart, curr_str, st, en):
-            if (st == en):
-                return 0
-            else:
-                if (use_gold):
-                    # enforce LR parsing (addmult only)
-                    if (len(curr_str) == 3):
-                        # single digit
-                        return 0
-                    curr_phrase = curr_str[st : en+1]
-                    if (print_parse):
-                        print(curr_phrase)
-                    if (len(curr_phrase) <= 5):
-                        # depth 1 subexpression, don't need to enforce
-                        return 0
-                    # atleast one non-trivial bracket left
-                    if (curr_phrase[2] == '('):
-                        # (+(...)...)
-                        end_brack = -1
-                        enc = 1
-                        for idx in range(3,len(curr_phrase)):
-                            if (curr_phrase[idx] == ')'):
-                                end_brack = idx
-                                enc -= 1
-                            elif (curr_phrase[idx] == '('):
-                                enc += 1
-                            if (enc == 0):
-                                break
-                    else:
-                        # (+d(...))
-                        end_brack = 2
-
-                    tot_score = 0
-                    for k in range(st+2, en-1):
-                        cand_score = score_chart[(st+2,k)] + score_chart[(k+1,en-1)]
-                        tot_score += cand_score
-
-                    s1 = recurse(score_chart, curr_str, st+2, st+end_brack)
-                    s2 = recurse(score_chart, curr_str, st + end_brack + 1, en-1)
-                    
-                    if mean:
-                        norm_score = chart[(st+2, st+end_brack)] + chart[(st + end_brack + 1, en-1)] - (tot_score/(en-st-3))
-                    else:
-                        k_rand = randint(st+2, en-3)
-                        norm_score = chart[(st+2, st+end_brack)] + chart[(st + end_brack + 1, en-1)] - score_chart[(st+2,k_rand)] - score_chart[(k_rand+1,en-2)]
-                else:
-                    # Normal computation
-                    scores = []
-                    for k in range(st, en):
-                        cand_score = score_chart[(st,k)] + score_chart[(k+1,en)]
-                        scores.append(cand_score)
-                    
-                    scores = torch.tensor(scores, requires_grad = True, dtype = torch.float).to(device)
-                    if (self.gumbel):
-                        # Soft split decision
-                        softmaxed = F.gumbel_softmax(scores, tau=tau, hard=True)
-                        best = (torch.argmax(softmaxed) + st).item()
-                        best_score = torch.sum(softmaxed*scores)
-                        tot_score = torch.sum(scores)
-                    else:
-                        # Greedy split decision
-                        best = (torch.argmax(scores) + st).item()
-                        best_score = torch.max(scores)
-                        tot_score = torch.sum(scores)
-
-                    if (print_parse):
-                        if (self.spaces):
-                            word_list = curr_str.split(" ")
-                            print((" ").join(word_list[st:best+1]), (" ").join(word_list[best+1:en]))
-                        else:
-                            print(curr_str[st:best+1], curr_str[best+1:en])
-
-                    s1 = recurse(score_chart, curr_str, st, best)
-                    s2 = recurse(score_chart, curr_str, best+1, en)
-                    
-                    if mean:
-                        norm_score = best_score - (tot_score/(en-st))
-                    else:
-                        k_rand = randint(st, en-1)
-                        norm_score = best_score - score_chart[(st,k_rand)] - score_chart[(k_rand+1,en)]
-
-                norm_score = min(norm_score, self.hinge_const)
-                return s1 + s2 + norm_score
 
         scores = []
         device = torch.device("cuda")
@@ -487,7 +477,7 @@ class Chart():
                 score = norm_score
             else:
                 # Run normal computation
-                score = recurse(chart, curr_str, 0, end)
+                score = self.recurse(chart, curr_str, 0, end, tau, mean, use_gold, print_parse, device)
             if (score == 0):
                 score = torch.tensor(0, requires_grad = True, dtype = torch.float).to(device)
             scores.append(score.float())
