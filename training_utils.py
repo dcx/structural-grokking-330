@@ -3,7 +3,7 @@ import sequence
 from tqdm import tqdm
 import os
 import wandb
-from time import time
+import time
 
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
@@ -184,6 +184,18 @@ def eval_callback(
     )
     return best_accs, curr_accs
 
+def get_grads(model):
+    parameters = [
+        p for p in model.model.parameters() if p.requires_grad
+    ]
+    curr_grads = []
+    for p in parameters:
+        if (p.grad == None):
+            curr_grads.append(None)
+        else:
+            param = p.grad.cpu().data
+            curr_grads.append(param)
+    return curr_grads
 
 def train_loop(
     args,
@@ -211,18 +223,25 @@ def train_loop(
     regularizer_delta = args.regularizer_delta
     regularizer_rel_wt = args.regularizer_rel_wt
     regularize_all = args.regularize_all
+    compute_dot = args.compute_grad_dot
+    use_gold = args.use_gold
+    tau_init = args.tau_init
+    tau_final = args.tau_final
+    use_linear = args.use_linear
 
     opt = get_opt(args.lr, args.weight_decay, model)
     scheduler = get_scheduler(opt, max_steps)
-
 
     if tokenizer is not None:
         train_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     else:
         train_data_collator = collate.VarLengthCollate(tokenizer)
 
-    best_ppl = {key: 10000.0 for key in val_datasets}
+    tau_step = (tau_final - tau_init)/max_steps
 
+    best_ppl = {key: 10000.0 for key in val_datasets}
+    sci_grads = None
+    loss_grads = None
     while True:
         # print(train_dataset)
         train_dataloader = DataLoader(
@@ -257,19 +276,30 @@ def train_loop(
 
                 # Tree regularizer!
                 if num_steps % regularizer_steps == 0:
+                    # Linear scheduling for gumbel softmax temperature tau
+                    tau = tau_init + tau_step * num_steps
                     if (regularizer is not None):
                         if (regularize_all):
-                            sci_charts = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                            sci_charts, samples = regularizer.build_scores(accum_strings, model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
                         else:
-                            sci_charts = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True)
+                            sci_charts, samples = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
                         if (args.mean_regularize):
-                            sci_scores = regularizer.get_score(sci_charts, mean=True)
+                            sci_scores = regularizer.get_score(sci_charts, mean=True, input_str=samples, use_gold=use_gold, tau=tau)
                         else:
-                            sci_scores = regularizer.get_score(sci_charts, mean=False)
+                            sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold, tau=tau)
                         # print(sci_scores)
-                        fin_sci_score = torch.mean(torch.stack(sci_scores))
-                        sci_loss = -regularizer_rel_wt * fin_sci_score
+                        if (use_linear):
+                            # Shikhar's linear time idea
+                            fin_sci_score = torch.mean(torch.stack([torch.abs(_) for _ in sci_scores]))
+                            sci_loss = regularizer_rel_wt * fin_sci_score
+                        else:
+                            fin_sci_score = torch.mean(torch.stack(sci_scores))
+                            sci_loss = -regularizer_rel_wt * fin_sci_score
                         sci_loss.backward()
+                        if compute_dot:
+                            # Dot products between tree reg gradients and task loss gradients
+                            sci_grads = get_grads(model)
+                            model.model.zero_grad()
                         accum_strings = []
                         regularizer_steps_decay += 1
                         if (regularizer_steps_decay % change_steps == 0):
@@ -278,9 +308,16 @@ def train_loop(
 
                 
                 losses.append(loss_curr.item())
-
                 loss_curr /= accum_steps
                 loss_curr.backward()
+                if compute_dot:
+                    # Dot products between tree reg gradients and task loss gradients
+                    loss_grads = get_grads(model)
+                    avg_dot = 0
+                    for idx in range(len(loss_grads)):
+                        if (loss_grads[idx] is not None and sci_grads[idx] is not None):
+                            curr_term = torch.sum(loss_grads[idx]*sci_grads[idx])
+                            avg_dot += curr_term
                 if len(losses) == accum_steps:
                     num_steps += 1
                     torch.nn.utils.clip_grad_norm_(
@@ -291,14 +328,25 @@ def train_loop(
                     )
                     grad_norm = get_grad_norm(model.model)
                     if (regularizer is not None):
-                        wandb.log(
-                            {
-                                "loss": sum(losses),
-                                "grad_norm": grad_norm,
-                                "iteration": num_steps,
-                                "sci_score": fin_sci_score
-                            }
-                        )
+                        if compute_dot:
+                            wandb.log(
+                                {
+                                    "loss": sum(losses),
+                                    "grad_norm": grad_norm,
+                                    "iteration": num_steps,
+                                    "avg_dot": avg_dot,
+                                    "sci_score": fin_sci_score
+                                }
+                            )
+                        else:
+                            wandb.log(
+                                {
+                                    "loss": sum(losses),
+                                    "grad_norm": grad_norm,
+                                    "iteration": num_steps,
+                                    "sci_score": fin_sci_score
+                                }
+                            )
                     else:
                         wandb.log(
                             {
@@ -314,7 +362,7 @@ def train_loop(
 
                     # Save model if save_dir and save_interval has been hit
                     if (save_model and save_interval == 0):
-                        # Always save to same directory
+                        # Always save to same file [AN, I find this more convenient for my runs]
                         if num_steps % 100000 == 0:
                             save_path = f"{os.path.join(save_dir, 'state')}.pt"
                             torch.save(model.model.state_dict(), save_path)
@@ -378,3 +426,81 @@ def train_loop(
 
     print("Best Perplexities,", best_ppl)
     return
+
+def reg_loop(
+    args,
+    model,
+    train_dataset,
+    device,
+    tokenizer=None,
+    regularizer=None
+):
+    '''
+    Quick hack to get tree regularization scores for a saved model on any dataset. 
+    Prints tree regularization scores for each batch, and the average score over all batches. 
+
+    Args:
+        args: Command line arguments.
+        model: The trained model.
+        train_dataset: Dataset for which tree regularization scores are required.
+        device: Device on which score computation will take place.
+        tokenizer: Input vocabulary.
+        regularizer: Initialized tree regularizer object.
+
+    Returns:
+        None
+    '''
+    num_steps = 0
+    train_batch_size = args.batch_size
+    use_gold = args.use_gold
+    max_steps = args.max_train_steps
+
+    if tokenizer is not None:
+        train_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    else:
+        train_data_collator = collate.VarLengthCollate(tokenizer)
+
+    all_sci_scores = []
+
+    while True:
+        # print(train_dataset)
+        train_dataloader = DataLoader(
+            train_dataset,
+            sampler=RandomSampler(train_dataset),
+            batch_size=train_batch_size,
+            collate_fn=train_data_collator,
+        )
+        total_train_sz = len(train_dataset)
+        if num_steps > max_steps:
+            break
+        with torch.enable_grad(), tqdm(total=total_train_sz) as progress_bar:
+            for curr_batch_dict in train_dataloader:
+                num_steps += 1
+                if num_steps > max_steps:
+                    break
+                if type(model) != torch.nn.Module:
+                    model.model.train()
+                else:
+                    model.train()
+                curr_batch_dict_gpu = {}
+                for key in curr_batch_dict:
+                    if (key == 'string'):
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key]
+                    else:
+                        curr_batch_dict_gpu[key] = curr_batch_dict[key].to(device)
+                progress_bar.update(curr_batch_dict["in"].shape[1])
+
+                # Tree regularizer!
+                if (regularizer is not None):
+                    sci_charts, samples = regularizer.build_scores(curr_batch_dict['string'], model, 0, tqdm_disable=True, parse_splits=None, batch=True, use_gold=use_gold)
+                    if (args.mean_regularize):
+                        sci_scores = regularizer.get_score(sci_charts, mean=True, input_str=samples, use_gold=use_gold, print_parse=False)
+                    else:
+                        sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold, print_parse=False)
+                    # print(sci_scores)
+                    fin_sci_score = torch.mean(torch.stack(sci_scores))
+                    all_sci_scores.append(fin_sci_score.item())
+                    print(fin_sci_score)
+    print(sum(all_sci_scores)/len(all_sci_scores))
+
+        

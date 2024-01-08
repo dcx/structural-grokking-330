@@ -350,6 +350,7 @@ def build_datasets_dyck(vocab=20, stack_depth=10):
             "in": in_subset_tokenized,
             "in_len": in_lens,
             "idxs": index_map[split],
+            "string": in_subset
         }
         dataset_curr = HFDataset.from_dict(data)
         dataset[split] = dataset_curr

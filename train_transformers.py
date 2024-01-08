@@ -20,7 +20,7 @@ from data_utils.ds_addmult_mod10_helpers import (
     eval_callback_mod10_lm
 )
 from transformer_helpers import create_model, create_lm, create_model_interface
-from training_utils import train_loop
+from training_utils import train_loop, reg_loop
 from regularizer_new import Chart
 
 WANDB_USERS = {
@@ -127,6 +127,7 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
+
 def init_wandb(args):
     """
     Initializes the wandb environment.
@@ -167,51 +168,7 @@ def get_datasets_and_vocab(args, language_model: bool):
             balance_depths=args.dsam_balance_depths,
             lm_mode=language_model)
     else:
-        datasets, in_vocab = build_datasets_lm()
-
-    return datasets, in_vocab
-
-
-def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
-    """
-    Returns the appropriate callback function based on the dataset type specified in args.
-
-    Args:
-        args: Command line arguments.
-        language_model (bool): Flag to determine if it's a language model.
-        model: The trained model.
-        in_vocab (CharVocabulary): Input vocabulary.
-        datasets: The datasets used for training and evaluation.
-
-    Returns:
-        function: The corresponding callback function.
-    """
-    if not args.callback:
-        return None
-
-    dataset_callbacks = {
-        "lm": lambda split: eval_lm_callback(model, in_vocab, split),
-        "tense": lambda split: eval_callback_tense_inflection(model, in_vocab, split),
-        "dyck": lambda split: eval_callback_dyck(model, in_vocab, split),
-        "ds-addmult-mod10": lambda split: eval_callback_mod10_lm(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval) \
-            if language_model and not args.lm_with_token_labels else \
-                eval_callback_mod10(model, in_vocab, split, datasets, eval_batch_size=args.batch_size_eval, has_token_labels=args.lm_with_token_labels)
-    }
-
-    return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
-
-
-def main_lm(args):
-    """
-    Main function for language modeling tasks.
-
-    Args:
-        args: Command line arguments.
-    """
-    language_model = args.lm
-    out_vocab = CharVocabulary(chars=set('0123456789'))
-
-    datasets, in_vocab = get_datasets_and_vocab(args, language_model)
+        datasets, in_vocab, _ = build_datasets_lm()
 
     return datasets, in_vocab
 
@@ -254,12 +211,16 @@ def get_regularizer(args, in_vocab):
     if (args.distance_fn == "cosine"):
         dist_fn = lambda x1, x2: F.cosine_similarity(x1, x2, dim=-1)
     else:
-        dist_fn = lambda x1, x2: torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
+        dist_fn = lambda x1, x2: -torch.sqrt(torch.sum((x1 - x2)**2, dim = -1))
     if (args.regularize):
         if args.dataset == "ds-addmult-mod10":
-            regularizer = Chart(dist_fn, in_vocab, spaces=False)
+            regularizer = Chart(dist_fn, in_vocab, spaces=False, hinge_const = args.hinge_const, 
+                                dataset=args.dataset, sample_num = args.reg_sample_num, sample_len = args.reg_sample_len, 
+                                depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference, gumbel=args.use_gumbel, linear=args.use_linear)
         else:
-            regularizer = Chart(dist_fn, in_vocab, spaces=True)
+            regularizer = Chart(dist_fn, in_vocab, spaces=True, hinge_const = args.hinge_const, dataset=args.dataset, sample_num = args.reg_sample_num, 
+                                sample_len = args.reg_sample_len, depth_limit = args.reg_depth_limit, single=args.reg_single, diff=args.use_difference, 
+                                gumbel=args.use_gumbel, linear=args.use_linear)
     else:
         regularizer = None
     return regularizer
@@ -299,6 +260,14 @@ def main_lm(args):
 
     if args.eval_only:
         raise ValueError("Testing functionality not implemented yet!")
+    elif args.reg_only:
+        reg_loop(
+            args,
+            interface,
+            datasets["train"],
+            device,
+            regularizer = regularizer
+        )
     else:
         train_loop(
             args,
@@ -341,6 +310,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--dataset", type=str, default="cogs")
     parser.add_argument("--eval_only", action="store_true")
+    parser.add_argument("--reg_only", action="store_true", help="Just calculate the parses, quick fix")
     parser.add_argument("--dump_errs", action="store_true")
     parser.add_argument("--dump_file", type=str, default="")
     parser.add_argument("--vec_dim", type=int, default=512)
@@ -364,12 +334,25 @@ if __name__ == "__main__":
     parser.add_argument("--regularizer_steps", type=int, default=2, help="Regularize every regularizer_steps training steps.")
     parser.add_argument("--regularizer_delta", type=float, default=0.0, help="Increase relative weight of regularizer by this value every change_steps of training")
     parser.add_argument("--change_steps", type=int, default=500, help="Increase relative weight of regularizer after this number of regularization steps")
+    parser.add_argument("--reg_sample_num", type=int, default=-1, help="Number of phrases sampled for regularization")
+    parser.add_argument("--reg_sample_len", type=int, default=10, help="Length of phrases sampled for regularization")
+    parser.add_argument("--reg_depth_limit", type=int, default=-1, help="Depth limited SCI computation")
+    parser.add_argument("--reg_single", action="store_true", help="Only top level decision for SCI")
+    parser.add_argument("--use_gold", action="store_true", help="Enforce LR parsing for addmult")
+    parser.add_argument("--use_difference", action="store_true", help="Use difference to compute vectors in SCI score")
+    parser.add_argument("--use_gumbel", action="store_true", help="Use gumbel softmax to encourage exploration")
+    parser.add_argument("--tau_init", type=float, default=1.0, help="Initial Temperature for gumbel/annealing")
+    parser.add_argument("--tau_final", type=float, default=0.1, help="Final temperature for gumbel/annealing")
+    parser.add_argument("--use_linear", action="store_true", help="Linear pass SCI computation")
+    # No T scheduling for now
 
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--batch_size_eval", type=int, default=8)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--eval_every", type=int, default=1000)
     parser.add_argument("--max_train_steps", type=int, default=20000)
+    parser.add_argument("--compute_grad_dot", action="store_true")
+    parser.add_argument("--hinge_const", type=float, default=10.0)
 
     parser.add_argument("--save_model", action="store_true", default=False)
     parser.add_argument("--save_interval", type=int, default=10000)

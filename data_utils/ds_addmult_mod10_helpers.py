@@ -12,6 +12,7 @@ import collate
 from tqdm import tqdm
 from util import test_continuations
 
+random.seed(42)
 
 def build_dataset_addmult_mod10(
     data_file: str, 
@@ -105,7 +106,10 @@ def build_dataset_addmult_mod10(
         # sample unique subtrees
         ds_uniques = set(dataset.unique('tree_sig'))
         n_subtrees = int(len(ds_uniques) * hold_out_p_subtrees)
-        held_out_subtrees = set(random.sample(ds_uniques, n_subtrees))
+        # This is not reproducible
+        # held_out_subtrees = set(random.sample(ds_uniques, n_subtrees))
+        # Quick Fix, selection is still uniformly random
+        held_out_subtrees = set(random.sample(sorted(list(ds_uniques)), n_subtrees))
 
         # hold out all examples that match those subtrees
         dataset_held_subtrees = dataset.filter(lambda example: example['tree_sig'] in held_out_subtrees, num_proc=8)
@@ -156,6 +160,7 @@ def build_dataset_addmult_mod10(
             'idxs': idx,
             'labels': tokenizer(str(example['ans_sublabels'])),
             'labels_len': len(str(example['ans_sublabels'])) - str(example['ans_sublabels']).count('_'), # number of close brackets
+            'string': example['example']
         }, with_indices=True,
         remove_columns=remove_columns)
     else:

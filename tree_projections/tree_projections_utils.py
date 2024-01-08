@@ -74,6 +74,7 @@ def get_all_hidden_states(
     end_relax_layer=0,
     tqdm_disable=False,
     pre_tokenized=None,
+    spaces=True
 ):
     def relax_cond(mask, relax_mask, num_layers):
         if input_masks is None:
@@ -142,7 +143,7 @@ def get_all_hidden_states(
         return hidden_states_all
     else:
         return get_word_vecs_from_subwords(
-            input_list, hidden_states_all, tokenizer, pre_tokenized
+            input_list, hidden_states_all, tokenizer, pre_tokenized, spaces=spaces
         )
 
 
@@ -157,7 +158,10 @@ def get_all_hidden_states_scratch(
     start_relax_layer=0,
     layer_id=-1,
     is_lm=False,
-    compute_grad=False
+    compute_grad=False,
+    spaces=True,
+    diff=False,
+    slice_dict=None
 ):
     def relax_cond(mask, relax_mask, num_layers):
         ### relax mask only masks padded stuff
@@ -172,6 +176,12 @@ def get_all_hidden_states_scratch(
     hidden_states_all = []
     batch_size = 256
     st = 0
+
+    if diff:
+        # Flatten slice dict
+        list_slice_dict = []
+        for list_slice in slice_dict:
+            list_slice_dict += list_slice
 
     train_data_collator = collate.VarLengthCollate(None)
 
@@ -189,6 +199,8 @@ def get_all_hidden_states_scratch(
         while st < len(input_list):
             en = min(len(input_list), st + batch_size)
             cslice = input_list[st:en]
+            if diff:
+                cslice_dict = list_slice_dict[st:en]
             inputs, input_lens = tokenizer_helper(cslice)
             inputs = inputs.to(device)
             input_lens = input_lens.to(device)
@@ -226,9 +238,17 @@ def get_all_hidden_states_scratch(
                     # the first thing is the [CLS] or [start id] which we ignore
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
                     if is_lm:
-                        hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
+                        if diff:
+                            # Difference-based SCI score computation
+                            hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
+                        else:
+                            hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
                     else:
-                        hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
+                        if diff:
+                            # Difference-based SCI score computation
+                            hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
+                        else:
+                            hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
                 hidden_states_all.append(hidden_states)
             progress_bar.update(en - st)
             st = en
@@ -237,7 +257,7 @@ def get_all_hidden_states_scratch(
         return hidden_states_all
     else:
         return get_word_vecs_from_subwords(
-            input_list, hidden_states_all, tokenizer, pre_tokenized
+            input_list, hidden_states_all, tokenizer, pre_tokenized, spaces=spaces
         )
 
 
@@ -265,7 +285,7 @@ def get_idxs(phrase_tokens, sent_tokens, st):
 
 
 def get_word_vecs_from_subwords(
-    input_list, hidden_states_all, tokenizer, pre_tokenized=None
+    input_list, hidden_states_all, tokenizer, pre_tokenized=None, spaces=True
 ):
     cumulants = []
     if pre_tokenized:
@@ -279,7 +299,10 @@ def get_word_vecs_from_subwords(
         if pre_tokenized:
             idxs = word_tokens_all[idx]
         else:
-            words = input_str.split(" ")
+            if (spaces):
+                words = input_str.split(" ")
+            else:
+                words = [str(_) for _ in input_str]
             idxs = []
             # go in order.
             st = 0
@@ -294,7 +317,7 @@ def get_word_vecs_from_subwords(
     return cumulants
 
 
-def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=True):
+def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=True, single=False):
     """
     masking_type can be token or attention
     """
@@ -351,15 +374,22 @@ def mask_all_possible(input_str, tokenizer, masking_type="attention", spaces=Tru
     # st = [0, 1, 2, ..., sz - l-1]
     all_inputs = {}
     # get new attention masks.
-    for l in range(1, sz + 1):
-        for st in range(sz - l + 1):
-            en = st + l
-            # only the stuff from st:en can be attended to.
-            all_inputs[(st, en - 1)] = generate_attention_mask(st, en)
+    if (single):
+        # Only regularize on top-layer decision
+        for st in range(sz):
+            all_inputs[(st, sz - 1)] = generate_attention_mask(st, sz)
+        for en in range(1, sz):
+            all_inputs[(0, en - 1)] = generate_attention_mask(0, en)
+    else:
+        for l in range(1, sz + 1):
+            for st in range(sz - l + 1):
+                en = st + l
+                # only the stuff from st:en can be attended to.
+                all_inputs[(st, en - 1)] = generate_attention_mask(st, en)
     return all_inputs
 
 
-def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=True):
+def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=True, single=False):
     masked_strs = []
     curr = 0
     sentence2idx_tuple = []
@@ -368,7 +398,7 @@ def get_masking_info(tokenizer, input_strs, masking_type="attention", spaces=Tru
     else:
         input_masks = None
     for inp in input_strs:
-        input_dict = mask_all_possible(inp, tokenizer, masking_type=masking_type, spaces=spaces)
+        input_dict = mask_all_possible(inp, tokenizer, masking_type=masking_type, spaces=spaces, single=single)
         curr_keys = [k for k in input_dict]
         if masking_type == "attention":
             masked_strs += [inp] * len(input_dict)
@@ -440,6 +470,7 @@ def tree_projection(
                     if curr_val > best_val:
                         best_val = curr_val
                         curr_split = k
+            print(word_list[st:curr_split+1], word_list[curr_split+1:en])
             p1, s1 = tree_projection_recurse(word_list, st, curr_split)
             p2, s2 = tree_projection_recurse(word_list, curr_split + 1, en)
             if normalize:
@@ -460,11 +491,14 @@ def tree_projection(
         return chart_values, parse, score
 
 
-def get_pre_tokenized_info(input_str, tokenizer, is_roberta=False):
+def get_pre_tokenized_info(input_str, tokenizer, is_roberta=False, spaces=True):
     sent_tokens = tokenizer(input_str)
     if is_roberta:
         sent_tokens = sent_tokens["input_ids"]
-    words = input_str.split(" ")
+    if (spaces):
+        words = input_str.split(" ")
+    else:
+        words = [str(_) for _ in input_str]
     idxs = []
     # go in order.
     st = 0
@@ -518,8 +552,6 @@ def get_tree_projection(
         layer_id=layer_id,
         is_lm=is_lm,
     )
-    # print(masked_strs)
-    # print(input_masks)
     keys = sentence2idx_tuple[0]
 
     if sim_fn == "euclidean":
