@@ -10,24 +10,26 @@ import model, dataset
 wandb_logger = WandbLogger(log_model="all")
 
 # GPU setup
-torch.set_float32_matmul_precision("high")
+torch.set_float32_matmul_precision('medium')
+
 
 # hyperparameters
 hparams = {
-    'bs': 48,
-    'num_workers': 16,
-    'pad_token_id': 30,
+    'bs': 32,
+    'pad_token_id': 30, # TODO: Attach to dataset.py
+    'sep_token_id': 31, # TODO: Attach to dataset.py
 
     # dataset
     'csv_file': '/dev/shm/amlif-50k.csv', # '../data/amlif-50k.csv',
-    'use_cur_action': True,
-    'use_cur_action_result': True,
-    'use_next_action': True,
+    'use_cur_action': False,
+    'use_cur_action_result': False,
+    'use_next_action': False,
     'val_check_interval': 2500, # in steps
     'holdout_trees_frac': 0.15,
     'train_frac': 0.99,
     'val_frac': 0.01, # currently ignored
     'test_max_items': 2500,     
+    'val_max_items': 2500,
 }
 # reminder: unlike main framework, here we are plugging test into val
 # because Lightning (correctly) doesn't have a test step during training
@@ -35,21 +37,21 @@ hparams = {
 
 
 hparams['model_hparams'] = {
-    'd_model': 512,
-    'nhead': 8,
-    'num_encoder_layers': 6, 
+    'd_model': 256,
+    'n_enc_heads': 8,
+    'n_enc_layers': 6, 
     'dropout': 0.1,
-    'ntoken': 32,
-    'lr': 3e-4,
+    'n_unique_tokens': 32,
+    'n_output_tokens': 32,
+    'lr': 1e-4,
     'pad_token_id': hparams['pad_token_id'],
     'weight_decay': 0,
+    'max_steps': 10, # upper bound on BPTT steps when randomly sampling
 }
 
 
 # log all hyperparameters
 wandb_logger.log_hyperparams(hparams)
-
-
 
 
 # setup data
@@ -58,19 +60,20 @@ ds_train, ds_val, ds_test = dataset.make_datasets(
     holdout_trees_frac=hparams['holdout_trees_frac'],
     train_frac=hparams['train_frac'], val_frac=hparams['val_frac'],
     test_max_items=hparams['test_max_items'],
+    val_max_items=hparams['val_max_items'],
     use_cur_action=hparams['use_cur_action'], 
     use_cur_action_result=hparams['use_cur_action_result'], 
     use_next_action=hparams['use_next_action'])
-dl_train = data.DataLoader(ds_train, batch_size=hparams['bs'], num_workers=hparams['num_workers'], collate_fn=dataset.collate_fn, pin_memory=True, shuffle=True)
-dl_val = data.DataLoader(ds_val, batch_size=hparams['bs'], num_workers=hparams['num_workers'], collate_fn=dataset.collate_fn, pin_memory=True, shuffle=True)
-dl_test = data.DataLoader(ds_test, batch_size=hparams['bs'], num_workers=hparams['num_workers'], collate_fn=dataset.collate_fn, pin_memory=True, shuffle=True)
+
+dl_train = data.DataLoader(ds_train, batch_size=hparams['bs'], collate_fn=dataset.collate_fn, shuffle=True, pin_memory=True)
+dl_val = data.DataLoader(ds_val, batch_size=hparams['bs'], collate_fn=dataset.collate_fn, shuffle=True, pin_memory=True)
 
 # model
-basic_model = model.PlanTransformer(**hparams['model_hparams'])
+basic_model = model.BPTTTransformer(**hparams['model_hparams'])
 
 # checkpointing
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='val_loss',
+    monitor='train_loss',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
     filename='model-{epoch:02d}-{step:08d}',
@@ -79,10 +82,9 @@ checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
 )
 
 # training
-trainer = L.Trainer(precision='bf16-mixed', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], callbacks=[checkpoint_callback])
-trainer.fit(basic_model, dl_train, dl_test)
-
-
+trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
+                    gradient_clip_val=1.0, callbacks=[checkpoint_callback], precision='bf16-mixed')
+trainer.fit(basic_model, dl_train, dl_val)
 
 
 

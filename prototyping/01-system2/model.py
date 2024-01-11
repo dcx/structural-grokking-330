@@ -22,12 +22,14 @@ class PlanTransformer(L.LightningModule):
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         self.embedding = nn.Embedding(ntoken, d_model)
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dropout=dropout)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dropout=dropout, batch_first=True, activation='gelu')
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
         self.linear = nn.Linear(d_model, ntoken)
 
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=ntoken, ignore_index=pad_token_id)
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=ntoken, ignore_index=pad_token_id)
+        self.train_rowwise_acc = torchmetrics.classification.Accuracy(task="binary", num_classes=2)
+        self.val_rowwise_acc = torchmetrics.classification.Accuracy(task="binary", num_classes=2)
 
         self.init_weights()
 
@@ -37,51 +39,67 @@ class PlanTransformer(L.LightningModule):
         self.linear.bias.data.zero_()
         self.linear.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor) -> torch.Tensor:
         # in lightning, forward defines the prediction/inference actions
-        x = x.T # (seq_len, bs)
+        # x = x.T # (seq_len, bs)
         x = self.embedding(x) * math.sqrt(self.d_model)
         x = self.pos_encoder(x)
         x = self.transformer_encoder(x, src_key_padding_mask=padding_mask)
         x = self.linear(x)
-        return x # (seq_len, bs, ntoken)
+        return x # (bs, seq_len, ntoken)
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop. It is independent of forward
         x, y, padding_mask = batch # (bs, seq_len)
-        y_hat = self(x, padding_mask=padding_mask) # (seq_len, bs, ntoken)
-        ce_y_hat = torch.permute(y_hat, (1, 2, 0)) # (bs, ntoken, seq_len)
+        y_hat = self(x, padding_mask=padding_mask) # (bs, seq_len, ntoken)
+        ce_y_hat = torch.permute(y_hat, (0, 2, 1)) # (bs, ntoken, seq_len)
         loss = F.cross_entropy(ce_y_hat, y, ignore_index=self.pad_token_id)
         self.log("train_loss", loss)
 
         # accuracy
-        y_pred = torch.argmax(y_hat, dim=2).T # (bs, seq_len)
+        y_pred = torch.argmax(y_hat, dim=2) # (bs, seq_len)
         self.train_acc(y_pred, y)
         self.log('train_acc_step', self.train_acc)
+
+        # rowwise accuracy: do we get the whole row right?
+        y_match = (y_pred == y) | (y == self.pad_token_id)
+        y_match_row = y_match.all(dim=1).long() # (bs,)
+        self.train_rowwise_acc(y_match_row, torch.ones_like(y_match_row))
+        self.log('train_rowwise_acc_step', self.train_rowwise_acc)
 
         return loss
     
     def validation_step(self, batch, batch_idx):
         x, y, padding_mask = batch # (seq_len, batch_size)
         y_hat = self(x, padding_mask=padding_mask) # (seq_len, bs, ntoken)
-        ce_y_hat = torch.permute(y_hat, (1, 2, 0)) # (bs, ntoken, seq_len)
+        ce_y_hat = torch.permute(y_hat, (0, 2, 1)) # (bs, ntoken, seq_len)
         loss = F.cross_entropy(ce_y_hat, y, ignore_index=self.pad_token_id)
         self.log("val_loss", loss)
 
         # accuracy
-        y_pred = torch.argmax(y_hat, dim=2).T # (bs, seq_len)
+        y_pred = torch.argmax(y_hat, dim=2) # (bs, seq_len)
         self.val_acc(y_pred, y)
         self.log('val_acc_step', self.val_acc)
+
+        # rowwise accuracy: do we get the whole row right?
+        y_match = (y_pred == y) | (y == self.pad_token_id)
+        y_match_row = y_match.all(dim=1).long() # (bs,)
+        self.val_rowwise_acc(y_match_row, torch.ones_like(y_match_row))
+        self.log('val_rowwise_acc_step', self.val_rowwise_acc)
 
         return loss
 
     def on_train_epoch_end(self):
         self.log('train_acc_epoch', self.train_acc.compute())
         self.train_acc.reset()
+        self.log('train_rowwise_acc_epoch', self.train_rowwise_acc.compute())
+        self.train_rowwise_acc.reset()
 
     def on_val_epoch_end(self):
         self.log('val_acc_epoch', self.val_acc.compute())
         self.val_acc.reset()
+        self.log('val_rowwise_acc_epoch', self.val_rowwise_acc.compute())
+        self.val_rowwise_acc.reset()
 
 
 

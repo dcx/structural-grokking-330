@@ -15,7 +15,7 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 16,
+    'bs': 32,
     'pad_token_id': 4,
 
     # dataset
