@@ -17,6 +17,9 @@ class System1(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_enc_layers)
 
+        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=n_enc_layers)
+
         self.init_weights()
 
     def init_weights(self) -> None:
@@ -37,67 +40,61 @@ class System1(nn.Module):
         - (seq_len, bs, d_model*2)
         """
         # embed x_orig, x_raw
-        x = x_raw.T # (seq_len, bs)
-        x = self.embedding(x) * math.sqrt(self.d_model) # (seq_len, bs, d_model)
+        x_state = x_raw.T # (seq_len, bs)
+        s = self.embedding(x_state) * math.sqrt(self.d_model) # (seq_len, bs, d_model)
+        s = self.pos_encoder(s) # (seq_len, bs, d_model)
+
         x_orig = x_orig.T # (seq_len, bs)
         o = self.embedding(x_orig) * math.sqrt(self.d_model) # (seq_len, bs, d_model)
+        o = self.pos_encoder(o) # (seq_len, bs, d_model)
 
-        # add separator token
-        sep = torch.ones((1, x.shape[1]), device=x.device).long() * self.sep_token_id # (1, bs)
-        sep = self.embedding(sep) * math.sqrt(self.d_model) # (1, bs, d_model)
+        # send state through encoder
+        o = self.transformer_encoder(o, src_key_padding_mask=padding_mask) # (seq_len, bs, d_model)
 
-        # concat wm,x and add positional encoding
-        enc_in = torch.cat([o, sep, x], dim=0) # (2*seq_len +1, bs, d_model)
-        enc_in = self.pos_encoder(enc_in) # (2*seq_len +1, bs, d_model)
+        # send original x through decoder, with state as context
+        s1 = self.transformer_decoder(s, o, tgt_key_padding_mask=padding_mask, 
+                                     tgt_is_causal=False, memory_is_causal=False) # (seq_len, bs, d_model)
 
-        # double up padding mask
-        padding_falses = torch.zeros((padding_mask.shape[0], 1), device=padding_mask.device).bool() # (bs, 1)
-        padding_mask = torch.cat([padding_mask, padding_falses, padding_mask], dim=1) # (bs, seq_len*2 +1)
-        # padding_mask = torch.cat([torch.zeros((x_raw.shape[0], 4), device=x_raw.device).bool(), padding_mask], dim=1) # (bs, 4+seq_len)
+        return s1
 
-        # push through transformer
-        s1_proposed = self.transformer_encoder(enc_in, src_key_padding_mask=padding_mask) # (2*seq_len +1, bs, d_model)
+# class System2(nn.Module):
+#     def __init__(self, d_model, n_enc_heads, n_enc_layers, pad_token_id, dropout):
+#         super().__init__()
+#         self.d_model = d_model
+#         self.pad_token_id = pad_token_id
 
-        return s1_proposed
+#         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
+#         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_enc_layers)
+#         #self.linear = nn.Linear(d_model, d_model)
 
-class System2(nn.Module):
-    def __init__(self, d_model, n_enc_heads, n_enc_layers, pad_token_id, dropout):
-        super().__init__()
-        self.d_model = d_model
-        self.pad_token_id = pad_token_id
+#         self.init_weights()
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_enc_layers)
-        #self.linear = nn.Linear(d_model, d_model)
-
-        self.init_weights()
-
-    def init_weights(self) -> None:
-        initrange = 0.1
-        #self.linear.bias.data.zero_()
-        #self.linear.weight.data.uniform_(-initrange, initrange)
+#     def init_weights(self) -> None:
+#         initrange = 0.1
+#         #self.linear.bias.data.zero_()
+#         #self.linear.weight.data.uniform_(-initrange, initrange)
 
 
-    def forward(self, s1_proposed, wm_current, padding_mask):
-        """
-        Single System 2 step.
-        Looks at current and proposed state, generates next state.
-        - s1_proposed (seq_len*2, bs, d_model)
-        - wm_current (seq_len, bs, d_model)
+#     def forward(self, s1_proposed, wm_current, padding_mask):
+#         """
+#         Single System 2 step.
+#         Looks at current and proposed state, generates next state.
+#         - s1_proposed (seq_len*2, bs, d_model)
+#         - wm_current (seq_len, bs, d_model)
 
-        Returns wm_next:
-        - (seq_len, bs, d_model)
-        """
+#         Returns wm_next:
+#         - (seq_len, bs, d_model)
+#         """
 
-        # concat s1_proposal and wm_current, push through transformer
-        enc_in  = torch.cat([s1_proposed, wm_current], dim=0) # (seq_len*3, bs, d_model)
-        padding_mask = torch.cat([padding_mask, padding_mask, padding_mask], dim=1) # (bs, seq_len*3)
-        enc_out = self.transformer_encoder(enc_in, src_key_padding_mask=padding_mask) # (seq_len*3, bs, d_model)
+#         # concat s1_proposal and wm_current, push through transformer
+#         enc_in  = torch.cat([s1_proposed, wm_current], dim=0) # (seq_len*3, bs, d_model)
+#         padding_mask = torch.cat([padding_mask, padding_mask, padding_mask], dim=1) # (bs, seq_len*3)
+#         enc_out = self.transformer_encoder(enc_in, src_key_padding_mask=padding_mask) # (seq_len*3, bs, d_model)
 
-        # next state: take middle third of output (x, wm_proposed, wm_current)
-        wm_next = enc_out[enc_out.shape[0]//3:2*enc_out.shape[0]//3, :, :] # (seq_len, bs, d_model)
-        # wm_next = self.linear(enc_out) # (seq_len, bs, d_model)
-        return wm_next
+#         # next state: take middle third of output (x, wm_proposed, wm_current)
+#         wm_next = enc_out[enc_out.shape[0]//3:2*enc_out.shape[0]//3, :, :] # (seq_len, bs, d_model)
+#         # wm_next = self.linear(enc_out) # (seq_len, bs, d_model)
+#         return wm_next
 
 class S1OutputTranslator(nn.Module):
     def __init__(self, d_model, n_enc_heads, n_enc_layers, pad_token_id, n_output_tokens, dropout):
@@ -184,7 +181,7 @@ class BPTTTransformer(L.LightningModule):
         self.max_steps = max_steps
 
         self.s1 = System1(d_model, n_enc_heads, n_enc_layers, n_unique_tokens, pad_token_id, dropout)
-        self.s2 = System2(d_model, n_enc_heads, n_enc_layers, pad_token_id, dropout)
+        #self.s2 = System2(d_model, n_enc_heads, n_enc_layers, pad_token_id, dropout)
         self.s1o = S1OutputTranslator(d_model, n_enc_heads, n_enc_layers, pad_token_id, n_output_tokens, dropout)
 
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_unique_tokens, ignore_index=pad_token_id)
@@ -308,7 +305,7 @@ if __name__ == "__main__":
     dropout = 0.1
 
     s1 = System1(d_model, n_enc_heads, n_enc_layers, n_unique_tokens, pad_token_id, dropout)
-    s2 = System2(d_model, n_enc_heads, n_enc_layers, pad_token_id, dropout)
+    # s2 = System2(d_model, n_enc_heads, n_enc_layers, pad_token_id, dropout)
     s2o = S1OutputTranslator(d_model, n_enc_heads, n_enc_layers, pad_token_id, n_output_tokens, dropout)
 
     # init dummy starting wm

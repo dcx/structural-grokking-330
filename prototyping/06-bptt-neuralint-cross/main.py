@@ -28,8 +28,9 @@ hparams = {
     'holdout_trees_frac': 0.15,
     'train_frac': 0.99,
     'val_frac': 0.01, # currently ignored
-    'test_max_items': 2500,     
+    'train_max_items': 2500, # debug: tiny subset for faster load. leave as None when not used
     'val_max_items': 2500,
+    'test_max_items': 2500, 
 }
 # reminder: unlike main framework, here we are plugging test into val
 # because Lightning (correctly) doesn't have a test step during training
@@ -39,7 +40,7 @@ hparams = {
 hparams['model_hparams'] = {
     'd_model': 384,
     'n_enc_heads': 8,
-    'n_enc_layers': 10, 
+    'n_enc_layers': 6, 
     'dropout': 0.1,
     'n_unique_tokens': 32,
     'n_output_tokens': 32,
@@ -59,6 +60,7 @@ ds_train, ds_val, ds_test = dataset.make_datasets(
     hparams['csv_file'],
     holdout_trees_frac=hparams['holdout_trees_frac'],
     train_frac=hparams['train_frac'], val_frac=hparams['val_frac'],
+    train_max_items=hparams['train_max_items'],
     test_max_items=hparams['test_max_items'],
     val_max_items=hparams['val_max_items'],
     use_cur_action=hparams['use_cur_action'], 

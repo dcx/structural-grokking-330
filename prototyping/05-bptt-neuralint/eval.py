@@ -10,12 +10,12 @@ import model, dataset
 wandb_logger = WandbLogger(log_model="all")
 
 # GPU setup
-torch.set_float32_matmul_precision('high')
+torch.set_float32_matmul_precision('medium')
 
 
 # hyperparameters
 hparams = {
-    'bs': 16,
+    'bs': 32,
     'pad_token_id': 30, # TODO: Attach to dataset.py
     'sep_token_id': 31, # TODO: Attach to dataset.py
 
@@ -68,23 +68,47 @@ ds_train, ds_val, ds_test = dataset.make_datasets(
 dl_train = data.DataLoader(ds_train, batch_size=hparams['bs'], collate_fn=dataset.collate_fn, shuffle=True, pin_memory=True)
 dl_val = data.DataLoader(ds_val, batch_size=hparams['bs'], collate_fn=dataset.collate_fn, shuffle=True, pin_memory=True)
 
-# model
-basic_model = model.BPTTTransformer(**hparams['model_hparams'])
+model = model.BPTTTransformer.load_from_checkpoint("../checkpoints/model-epoch=00-step=00055000.ckpt", **hparams['model_hparams'])
+model.eval()
 
-# checkpointing
-checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='train_loss',
-    every_n_train_steps=2500,
-    dirpath='../checkpoints',
-    filename='model-{epoch:02d}-{step:08d}',
-    save_top_k=3,
-    mode='min',
-)
-
-# training
-trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
-                    gradient_clip_val=1.0, callbacks=[checkpoint_callback])
-trainer.fit(basic_model, dl_train, dl_val)
+# predict with the model
+print('test')
 
 
+def detokenize(x, map_dict):
+    "x: (batch, seq_len)"
+    x = x.cpu().numpy()
+    x = x.tolist()
+    x = [[map_dict[c] for c in row] for row in x]
+    x = [''.join(row) for row in x]
+    return x
+
+for i, (o, x, y, mask) in enumerate(dl_val):
+    print(i)
+    o = o.cuda()
+    x = x.cuda()
+    y = y.cuda()
+    mask = mask.cuda()
+
+    # forward pass
+    n_rows = 4
+    y_hat = model(o[:n_rows], x[:n_rows], mask[:n_rows])
+    y_pred = y_hat.argmax(dim=-1).T # (batch, seq_len)
+    y_real = y[:n_rows] # (batch, seq_len)
+
+    # detokenize
+    ins   = detokenize(x[:n_rows], ds_train.char_unmap)
+    preds = detokenize(y_pred, ds_train.char_unmap)
+    reals = detokenize(y_real, ds_train.char_unmap)
+
+    # print comparison
+    for inn, pred, real in zip(ins, preds, reals):
+        print(inn)
+        print(pred)
+        print(real)
+        print()
+
+    print("Break here.")
+
+    
 

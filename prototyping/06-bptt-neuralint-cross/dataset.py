@@ -25,7 +25,7 @@ def collate_fn(batch):
     return o_batch, x_batch, y_batch, (y_batch == pad_token_id)
 
 
-def make_datasets(csv_file, holdout_trees_frac=0.1, train_frac=0.8, val_frac=0.2, val_max_items=2500, test_max_items=2500,
+def make_datasets(csv_file, holdout_trees_frac=0.1, train_frac=0.8, val_frac=0.2, train_max_items=None, val_max_items=2500, test_max_items=2500,
                   use_cur_action=True, use_cur_action_result=True, use_next_action=False):
     """
     Given a dataset CSV, creates a triplet of datasets, in which:
@@ -47,10 +47,10 @@ def make_datasets(csv_file, holdout_trees_frac=0.1, train_frac=0.8, val_frac=0.2
 
     # make train/val dataframe: only non-held out trees
     train_val_df = csv_data[~csv_data.tree_sig.isin(holdout_trees)]
-    train, val = train_test_split(train_val_df, train_size=train_frac, test_size=val_frac)
 
-    if val_max_items is not None:
-        val = val[:val_max_items]
+    train_size = train_frac if train_max_items is None else train_max_items
+    val_size = val_frac if val_max_items is None else val_max_items
+    train, val = train_test_split(train_val_df, train_size=train_size, test_size=val_size)
 
     ds_train = PlanDataset(train, use_cur_action, use_cur_action_result, use_next_action)
     ds_val = PlanDataset(val, use_cur_action, use_cur_action_result, use_next_action)
