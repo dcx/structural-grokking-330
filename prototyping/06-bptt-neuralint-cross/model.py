@@ -3,6 +3,12 @@ import lightning as L
 import math
 import torchmetrics
 import random
+import modelbasics as mb
+import pl_bolts
+
+
+
+
 
 class System1(nn.Module):
     def __init__(self, d_model, n_enc_heads, n_enc_layers, n_unique_tokens, pad_token_id, dropout):
@@ -11,13 +17,12 @@ class System1(nn.Module):
         self.pad_token_id = pad_token_id
         self.sep_token_id = 31 # TODO: Attach to param
 
-        self.pos_encoder = PositionalEncoding(d_model, dropout)
         self.embedding = nn.Embedding(n_unique_tokens, d_model, padding_idx=pad_token_id)
         
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
+        encoder_layer = mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_enc_layers)
 
-        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
+        decoder_layer = mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, dropout=dropout, activation='gelu')
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=n_enc_layers)
 
         self.init_weights()
@@ -42,16 +47,14 @@ class System1(nn.Module):
         # embed x_orig, x_raw
         x_state = x_raw.T # (seq_len, bs)
         s = self.embedding(x_state) * math.sqrt(self.d_model) # (seq_len, bs, d_model)
-        s = self.pos_encoder(s) # (seq_len, bs, d_model)
 
         x_orig = x_orig.T # (seq_len, bs)
         o = self.embedding(x_orig) * math.sqrt(self.d_model) # (seq_len, bs, d_model)
-        o = self.pos_encoder(o) # (seq_len, bs, d_model)
 
-        # send state through encoder
+        # send original through encoder
         o = self.transformer_encoder(o, src_key_padding_mask=padding_mask) # (seq_len, bs, d_model)
 
-        # send original x through decoder, with state as context
+        # send state x through decoder, with original as context
         s1 = self.transformer_decoder(s, o, tgt_key_padding_mask=padding_mask, 
                                      tgt_is_causal=False, memory_is_causal=False) # (seq_len, bs, d_model)
 
@@ -145,7 +148,7 @@ class S1OutputTranslator(nn.Module):
         #return confidence, x_pred # new predictions go here
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 2500):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         position = torch.arange(max_len).unsqueeze(1)
@@ -286,10 +289,16 @@ class BPTTTransformer(L.LightningModule):
         self.val_rowwise_acc.reset()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.wd)
-        return optimizer
-
-
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.wd)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR(
+                    optimizer, warmup_epochs=2000, max_epochs=100000, warmup_start_lr=0.0, eta_min=0.1*self.lr, last_epoch=-1), # torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100000, eta_min=0.1*self.lr),
+                "interval": "step",
+                "frequency": 1,
+            },
+        }
 
 
 
