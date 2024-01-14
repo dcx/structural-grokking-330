@@ -5,7 +5,7 @@ import csv, re
 from multiprocessing import Process
 import random
 
-def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False, enable_for=True, enable_let=True):
+def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False, enable_for=True, enable_let=True, step_vars=False):
     """
     Generate problems based on the grammar, and write them to a CSV file.
     - out_file: path to the output CSV file
@@ -29,6 +29,11 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False, en
         gen_weights[4] = 0
     if not enable_let:
         gen_weights[3] = 0
+
+    # skip these states when generating stepwise data
+    skip_states = ['E'] # used internally to manage loop stack
+    if not step_vars:
+        skip_states.append('V') # variable lookup steps: (+ab) -> (+2b) -> (+21)
 
     with open(out_file, 'w') as f:
         csv_writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -142,7 +147,7 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False, en
                         #print(f"Next state: {cur_working_state}")
                         step_data['next_state'] = cur_working_state
 
-                        if op in ['V', 'E']: 
+                        if op in skip_states: 
                             # updates which don't emit a formal state change, or action
                             # V steps: trivial action, change state but bundle in other states
                             # E steps: only used in this function, to manage loop stack
@@ -200,19 +205,19 @@ def merge_csvs(in_files, out_file):
 
 
 
-def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, stepwise=False, enable_for=True, enable_let=True):
+def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, stepwise=False, enable_for=True, enable_let=True, step_vars=True):
     "MP wrapper"
     processes = []
     filenames = []
 
     if n_processes == 1: # passthrough for nicer debugging
-        make_data(out_file, n_examples, max_height, min_height, stepwise, enable_for, enable_let)        
+        make_data(out_file, n_examples, max_height, min_height, stepwise, enable_for, enable_let, step_vars)        
     else:
         items_per_proc = n_examples // n_processes
         for i in range(n_processes):
             filenames.append(f'{out_file}-{i:02}.csv')
 
-            p = Process(target=make_data, args=(filenames[-1], items_per_proc, max_height, min_height, stepwise, enable_for, enable_let))
+            p = Process(target=make_data, args=(filenames[-1], items_per_proc, max_height, min_height, stepwise, enable_for, enable_let, step_vars))
             p.start()
             processes.append(p)
         for p in processes:
@@ -227,7 +232,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('../data/test-nonstep-100k.csv', 100000, min_height=6, max_height=6, n_processes=25, stepwise=True, enable_for=False, enable_let=False)
+    make_data_mp('../data/test-nonstep-30k.csv', 30000, min_height=6, max_height=6, n_processes=30, stepwise=True, enable_for=True, enable_let=True, step_vars=True)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')
