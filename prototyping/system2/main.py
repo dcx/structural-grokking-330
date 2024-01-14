@@ -54,7 +54,7 @@ wandb_logger.log_hyperparams(hparams)
 
 
 # setup data
-ds_train, ds_val, ds_test = dataset.make_datasets(
+ds_train, ds_val, ds_test, _ = dataset.make_datasets(
     hparams['csv_file'],
     holdout_trees_frac=hparams['holdout_trees_frac'],
     train_frac=hparams['train_frac'], val_frac=hparams['val_frac'],

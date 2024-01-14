@@ -4,6 +4,9 @@ import math
 import torchmetrics
 
 
+import dataset
+from utils import get_difference
+
 # Define entire system as a LightningModule
 class PlanTransformer(L.LightningModule):
     """
@@ -13,6 +16,7 @@ class PlanTransformer(L.LightningModule):
 
     def __init__(self, d_model, nhead, num_encoder_layers, dropout, ntoken, lr, pad_token_id, weight_decay):
         super().__init__()
+        self.save_hyperparameters()
 
         self.d_model = d_model
         self.lr = lr
@@ -82,8 +86,6 @@ class PlanTransformer(L.LightningModule):
     def on_val_epoch_end(self):
         self.log('val_acc_epoch', self.val_acc.compute())
         self.val_acc.reset()
-
-
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.wd)
