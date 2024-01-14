@@ -5,7 +5,7 @@ import csv, re
 from multiprocessing import Process
 import random
 
-def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
+def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False, enable_for=True, enable_let=True):
     """
     Generate problems based on the grammar, and write them to a CSV file.
     - out_file: path to the output CSV file
@@ -24,6 +24,12 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
              'cur_action_aligned', 'cur_action_type', 'cur_action_tight', 'cur_action_res',
              'next_action_aligned', 'next_action_type', 'next_action_tight', 'next_action_res']
 
+    gen_weights = generate.gen_weights
+    if not enable_for:
+        gen_weights[4] = 0
+    if not enable_let:
+        gen_weights[3] = 0
+
     with open(out_file, 'w') as f:
         csv_writer = csv.DictWriter(f, fieldnames=fieldnames)
         csv_writer.writeheader()
@@ -37,7 +43,7 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
             for i in range(n_items_per_height):
                 interpreter.reset()
                 data = {}
-                data['example'] = generate.generate_program(height-1, list()) # h-1 to align with other datasets and interpret.get_height
+                data['example'] = generate.generate_program(height-1, list(), gen_weights=gen_weights) # h-1 to align with other datasets and interpret.get_height
                 tree = parser.parse(data['example'])
                 data['answer'], data['ans_sublabels'] = interpreter.visit(tree)
                 data['height'] = interpret.get_height(tree)
@@ -194,19 +200,19 @@ def merge_csvs(in_files, out_file):
 
 
 
-def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, stepwise=False):
+def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, stepwise=False, enable_for=True, enable_let=True):
     "MP wrapper"
     processes = []
     filenames = []
 
     if n_processes == 1: # passthrough for nicer debugging
-        make_data(out_file, n_examples, max_height, min_height, stepwise)        
+        make_data(out_file, n_examples, max_height, min_height, stepwise, enable_for, enable_let)        
     else:
         items_per_proc = n_examples // n_processes
         for i in range(n_processes):
             filenames.append(f'{out_file}-{i:02}.csv')
 
-            p = Process(target=make_data, args=(filenames[-1], items_per_proc, max_height, min_height, stepwise))
+            p = Process(target=make_data, args=(filenames[-1], items_per_proc, max_height, min_height, stepwise, enable_for, enable_let))
             p.start()
             processes.append(p)
         for p in processes:
@@ -221,7 +227,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('../data/test-nonstep-20k.csv', 20000, min_height=6, max_height=6, n_processes=8, stepwise=False)
+    make_data_mp('../data/test-nonstep-100k.csv', 100000, min_height=6, max_height=6, n_processes=25, stepwise=True, enable_for=False, enable_let=False)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')

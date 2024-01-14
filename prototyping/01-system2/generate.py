@@ -4,8 +4,16 @@ import random, copy
 from datetime import datetime
 
 var_names = ['x', 'y', 'z', 'a', 'b', 'c']
+gen_weights = [
+    1, # number
+    30, # operation
+    6, # if
+    30, # let
+    15, # for
+    3, # var
+]
 
-def generate_program(tgt_depth, closed_vars, min_depth=None):
+def generate_program(tgt_depth, closed_vars, min_depth=None, gen_weights=gen_weights):
     """
     tgt_depth: the target depth of the generated program
         the final program will never be deeper than this
@@ -22,18 +30,18 @@ def generate_program(tgt_depth, closed_vars, min_depth=None):
     choices, weights = [], []
     if tgt_depth >= 0 and min_depth<=0: # base case
         choices += ['number']
-        weights += [1]
+        weights += [gen_weights[0]]
     if tgt_depth >= 1:
         choices += ['operation', 'if']
-        weights += [30, 6] # 30, 15]
+        weights += gen_weights[1:3]
     if tgt_depth >= 2: # these have a builtin nested expression
         choices += ['let', 'for']
-        weights += [30, 15]
+        weights += gen_weights[3:5]
 
     # Only allow variables if there are variables to choose from
     if len(closed_vars) > 0 and tgt_depth>=0 and min_depth<=0:
         choices.append('var')
-        weights.append(3)
+        weights.append(gen_weights[5])
 
     expr_type = random.choices(choices, weights)[0]
 
@@ -54,8 +62,8 @@ def generate_program(tgt_depth, closed_vars, min_depth=None):
     # Generate an operation expression
     elif expr_type == 'operation':
         op = random.choice(['+', '*', '<']) # '=', '>', 
-        e1s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1)
-        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1)
+        e1s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights)
+        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights)
 
         return f"({op}{e1s}{e2s})" #, res)
 
@@ -64,20 +72,20 @@ def generate_program(tgt_depth, closed_vars, min_depth=None):
     # Generate a let expression
     elif expr_type == 'let':
         var = random.choice(var_names)
-        e1s = generate_program(tgt_depth-2, closed_vars.copy(), min_depth-2)
+        e1s = generate_program(tgt_depth-2, closed_vars.copy(), min_depth-2, gen_weights)
 
         # Add the variable to the list of closed variables
         closed_vars.append({var: None}) # new closure
-        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1)
+        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights)
         closed_vars.pop() # exit closure
 
         return f"(L[{var}{e1s}]{e2s})" #, e2v)
 
     # Generate an if expression
     elif expr_type == 'if':
-        e1s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1)
-        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1)
-        e3s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1)
+        e1s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights)
+        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights)
+        e3s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights)
         return f"(I{e1s}{e2s}{e3s})"
 
     # # Generate a do expression
@@ -86,7 +94,7 @@ def generate_program(tgt_depth, closed_vars, min_depth=None):
     #     l_ens = []
     #     n_expressions = random.randint(2, 5)
     #     for i in range(n_expressions):
-    #         ens, env = generate_program(max_depth-1, closed_vars, min_depth-1)
+    #         ens, env = generate_program(max_depth-1, closed_vars, min_depth-1, gen_weights)
     #         l_ens.append(ens)
 
     #     exprs = ' '.join(l_ens)
@@ -96,10 +104,10 @@ def generate_program(tgt_depth, closed_vars, min_depth=None):
     elif expr_type == 'for':
         var = random.choice(var_names)
 
-        e1s = generate_program(tgt_depth-2, closed_vars.copy(), min_depth-2)
+        e1s = generate_program(tgt_depth-2, closed_vars.copy(), min_depth-2, gen_weights)
 
         closed_vars.append({var: 0}) # new closure with loop var init
-        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1) # loop body
+        e2s = generate_program(tgt_depth-1, closed_vars.copy(), min_depth-1, gen_weights) # loop body
 
         for_expr = f"(F[{var}{e1s}]0{e2s})"
 
