@@ -48,8 +48,8 @@ def make_datasets(csv_file, holdout_trees_frac=0.1, train_frac=0.8, val_frac=0.2
     # make train/val dataframe: only non-held out trees
     train_val_df = csv_data[~csv_data.tree_sig.isin(holdout_trees)]
 
-    train_size = train_frac if train_max_items is None else train_max_items
     val_size = val_frac if val_max_items is None else val_max_items
+    train_size = 1 - val_frac if val_max_items is None else len(train_val_df) - val_max_items
     train, val = train_test_split(train_val_df, train_size=train_size, test_size=val_size)
 
     ds_train = PlanDataset(train, use_cur_action, use_cur_action_result, use_next_action)

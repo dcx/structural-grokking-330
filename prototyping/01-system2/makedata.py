@@ -5,7 +5,7 @@ import csv, re
 from multiprocessing import Process
 import random
 
-def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
+def make_data(out_file, n_examples, max_height, min_height=1, max_length = -1, stepwise=False):
     """
     Generate problems based on the grammar, and write them to a CSV file.
     - out_file: path to the output CSV file
@@ -38,6 +38,10 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False):
                 interpreter.reset()
                 data = {}
                 data['example'] = generate.generate_program(height-1, list()) # h-1 to align with other datasets and interpret.get_height
+                if (max_length != -1 and len(data['example']) > max_length):
+                    print('Discarded')
+                    continue
+                print('Generated')
                 tree = parser.parse(data['example'])
                 data['answer'], data['ans_sublabels'] = interpreter.visit(tree)
                 data['height'] = interpret.get_height(tree)
@@ -194,34 +198,28 @@ def merge_csvs(in_files, out_file):
 
 
 
-def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, stepwise=False):
+def make_data_mp(out_file, n_examples, max_height, min_height=1, max_length=-1, n_processes=1, stepwise=False):
     "MP wrapper"
     processes = []
     filenames = []
 
     if n_processes == 1: # passthrough for nicer debugging
-        make_data(out_file, n_examples, max_height, min_height, stepwise)        
+        make_data(out_file, n_examples, max_height, min_height, max_length, stepwise)        
     else:
         items_per_proc = n_examples // n_processes
         for i in range(n_processes):
             filenames.append(f'{out_file}-{i:02}.csv')
 
-            p = Process(target=make_data, args=(filenames[-1], items_per_proc, max_height, min_height, stepwise))
+            p = Process(target=make_data, args=(filenames[-1], items_per_proc, max_height, min_height, max_length, stepwise))
             p.start()
             processes.append(p)
         for p in processes:
             p.join()
         merge_csvs(filenames, out_file)
 
-
-
-
-
-
-
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('/storygen/amlif-data/amlif-50k.csv', 30000, min_height=6, max_height=8, n_processes=20, stepwise=True)
+    make_data_mp('/nlp/scr/ananjan/amlif-data/amlif-50k.csv', 20000, min_height=4, max_height=8, max_length=150, n_processes=20, stepwise=True)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')

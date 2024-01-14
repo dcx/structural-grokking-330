@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 import model, dataset
 
 # wandb setup
-wandb_logger = WandbLogger(log_model="all")
+wandb_logger = WandbLogger(dir='/nlp/scr/ananjan/wandb', log_model="all")
 
 # GPU setup
 torch.set_float32_matmul_precision('highest')
@@ -21,7 +21,7 @@ hparams = {
     'sep_token_id': 31, # TODO: Attach to dataset.py
 
     # dataset
-    'csv_file': '/dev/shm/amlif-50k.csv', # '../data/amlif-50k.csv',
+    'csv_file': '/nlp/scr/ananjan/amlif-data/amlif-10k.csv', # '../data/amlif-50k.csv',
     'use_cur_action': False,
     'use_cur_action_result': False,
     'use_next_action': False,
@@ -42,7 +42,7 @@ hparams['model_hparams'] = {
     'd_model': 384,
     'n_enc_heads': 8,
     'n_enc_layers': 6, 
-    'dropout': 0.0,
+    'dropout': 0.1,
     'n_unique_tokens': 32,
     'n_output_tokens': 32,
     'lr': 1e-4,
@@ -78,9 +78,9 @@ basic_model = model.BPTTTransformer(**hparams['model_hparams'])
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
     monitor='train_loss',
     every_n_train_steps=2500,
-    dirpath='../checkpoints',
-    filename='model-{epoch:02d}-{step:08d}',
-    save_top_k=3,
+    dirpath='/nlp/scr/ananjan/checkpoints',
+    filename='model-10k-{epoch:02d}-{step:08d}',
+    save_top_k=1,
     mode='min',
 )
 lr_monitor_callback = L.pytorch.callbacks.LearningRateMonitor(logging_interval='step')
