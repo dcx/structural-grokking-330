@@ -135,7 +135,7 @@ class AddMultLetInterpreter(lark.visitors.Interpreter):
 
 
         self.state.pop() # exit closure
-        return (accum, '___'+s_defn+s_expr+str(accum))
+        return (accum, '__'+s_defn+'_'+s_expr+str(accum))
 
     def var(self, meta, children):
         var = children[0].value
@@ -245,7 +245,7 @@ if __name__ == '__main__':
     parser = lark.Lark(calc_grammar, start='expr', propagate_positions=True)
     interpreter = AddMultLetInterpreter()
 
-    testexp = "(I(+(L[x8](I6xx))(L[z2]z))(L[b(*86)](I(+bb)(<b6)(*b1)))(L[c(+84)](L[bc](*cb))))"
+    testexp = "(<(F[a(+(I639)(*10))]0(<(L[ca](+ca))(+(+aa)(*aa))))(F[a(L[b9](*bb))]0(*(I(*0a)(*aa)(+8a))(L[ya](+y6)))))"
     # testexp = "(L [x4] (L [y(+1(*2x))] (*y3)) )" # x=4, y=2x+1, 3y
 
     # testexp = testexp.replace(" ", "") # whitespace is for humans
