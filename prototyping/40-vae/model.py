@@ -55,20 +55,27 @@ class BPTTTransformer(L.LightningModule):
         # get the final non-pad timestep of x_enc
         # (we want to predict the entire input from a single token)
         x_final_step = torch.sum(~padding_mask, dim=1)-1 # (bs,)
-        x_enc_final  = x_enc[x_final_step, torch.arange(x_enc.shape[1]), :] # (bs, d_model)
+        # x_enc_final  = x_enc[x_final_step, torch.arange(x_enc.shape[1]), :] # (bs, d_model)
         # x_enc_final = x_enc_final.unsqueeze(0) # (1, bs, d_model)
 
-        return x_emb, x_enc_final
+        # zero x_enc for padding tokens
+        x_enc = x_enc * (~(padding_mask.T)).unsqueeze(2)
+
+        return x_emb, x_enc # x_enc_final
 
     def forward_dec(self, x_tf_in, x_enc: torch.Tensor, padding_mask: torch.Tensor=None) -> torch.Tensor:
         """
-        simplified version to prove concept: only use final timestep of x_enc
-        x_enc: (bs, d_model)
+        simplified version to prove concept: 
+        calculate the combined matrix in a for loop
+
+        x_enc: (seq_len, bs, d_model)
         """
         # push through decoder
 
-        x_enc = x_enc.unsqueeze(0) # (1, bs, d_model)
-        
+        # get number of non-pad timesteps of x_enc
+        x_enc_steps = torch.sum(~padding_mask, dim=1) # (bs,)
+
+
         # setup masks
         # tgt_mask: standard causal mask (word 3 can see words 1 and 2)
         tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(sz=x_tf_in.shape[0]).to(x_tf_in.device) # (seq_len, seq_len)
@@ -76,13 +83,22 @@ class BPTTTransformer(L.LightningModule):
         tgt_key_padding_mask = torch.cat( # (bs, seq_len)
             [torch.zeros((x_enc.shape[1], 1)).to(x_enc.device), # (bs, 1)
              padding_mask[:, :-1]], dim=1).bool() # (bs, seq_len-1)
-        # memory mask (T,S): None
-        # every word in the target decoder sequence can attend to every word in source memory
-        # (there is only one word in source memory per row, so this is trivially true)
+
+        # memory mask (T,S): 
+        # every word in the target decoder sequence gets one randomly selected x_enc
+        # in the source memory it's allowed to attend to.
+        memory_mask = torch.ones(x_enc.shape[0], x_enc.shape[0]).to(x_enc.device).bool() # (seq_len, seq_len)
+        for i in range(x_enc.shape[0]):
+            # random choice: for x_3, we can use any of x_enc_3, x_enc_4, x_enc_5, etc.
+            # (but not x_enc_0, x_enc_1, x_enc_2)
+            choice_from = torch.arange(i, x_enc.shape[0]).to(x_enc.device) # (seq_len,)
+            choice = torch.randint(0, choice_from.shape[0], (1,)).to(x_enc.device) # (1,)
+            memory_mask[i, choice_from[choice]] = False # (seq_len, seq_len)
 
         # run decoder
         x_dec = self.dec(x_tf_in, x_enc, 
                          tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask,
+                         memory_mask=memory_mask,
                          tgt_is_causal=True) # (seq_len, bs, d_model)
 
         # project out to n_output_tokens
@@ -257,7 +273,7 @@ class BPTTTransformer(L.LightningModule):
         self.log('val_rowwise_acc_step', self.val_rowwise_acc)
 
         # decode test
-        self.decode(x_enc[0], x[0])
+        self.decode(x_enc[10,0], x[0])
 
         return loss
 
@@ -277,15 +293,15 @@ class BPTTTransformer(L.LightningModule):
         x_wip = torch.ones((1, 1, self.d_model)).to(x_enc.device) # (1, 1, d_model)
 
         # decode
-        x_enc_shaped = x_enc.unsqueeze(0) # (1, d_model)
+        x_enc_shaped = x_enc.unsqueeze(0).unsqueeze(1) # (1, 1, d_model)
         
         # without teacher forcing
         for i in range(self.max_steps):
             # project pxadding mask and encode
             padding_mask = torch.zeros((x_wip.shape[1], x_wip.shape[0]), dtype=torch.bool).to(x_enc.device) # (bs, seq_len)
-            # x_enc_proj = x_enc_shaped.repeat(x_wip.shape[0], x_wip.shape[1], 1) # (seq_len, bs, d_model)
+            x_enc_proj = x_enc_shaped.repeat(x_wip.shape[0], x_wip.shape[1], 1) # (seq_len, bs, d_model)
 
-            x_logits = self.forward_dec(x_wip, x_enc_shaped, padding_mask=padding_mask) # (seq_len, 1, n_output_tokens)
+            x_logits = self.forward_dec(x_wip, x_enc_proj, padding_mask=padding_mask) # (seq_len, 1, n_output_tokens)
             x_preds = torch.argmax(x_logits, dim=2) # (seq_len, 1)
 
             # prepare next input
@@ -300,8 +316,8 @@ class BPTTTransformer(L.LightningModule):
              x_emb[:-1, :, :]], dim=0) # (seq_len, 1, d_model)
 
         padding_mask = (x==self.pad_token_id).unsqueeze(0) # (bs, seq_len)
-        # x_enc_proj = x_enc_shaped.repeat(x_emb.shape[0], x_emb.shape[1], 1) # (seq_len, bs, d_model)
-        y_hat = self.forward_dec(x_tf_in, x_enc_shaped, padding_mask=padding_mask) # (seq_len, bs, n_output_tokens)
+        x_enc_proj = x_enc_shaped.repeat(x_emb.shape[0], x_emb.shape[1], 1) # (seq_len, bs, d_model)
+        y_hat = self.forward_dec(x_tf_in, x_enc_proj, padding_mask=padding_mask) # (seq_len, bs, n_output_tokens)
         y_pred = torch.argmax(y_hat, dim=2).T # (bs, seq_len)
         print(y_pred)
 

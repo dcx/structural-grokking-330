@@ -19,9 +19,9 @@ hparams = {
     'pad_token_id': 4,
 
     # dataset
-    'val_check_interval': 800, # in steps
+    'val_check_interval': 400, # in steps
     'n_train': 50000,     
-    'n_val': 800,     
+    'n_val': 400,     
 
     'n_automata_steps': 10,
 }
