@@ -48,6 +48,9 @@ class S1Transformer(L.LightningModule):
         self.dec = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu'), num_layers=n_enc_layers)
         self.linear = nn.Linear(d_model, n_output_tokens)
         self.embedding = nn.Embedding(n_unique_tokens, d_model, padding_idx=pad_token_id)
+        self.dummy_first_token = (torch.rand_like(torch.zeros((1, 1, d_model))) * math.sqrt(d_model)).to('cuda') # (1, 1, d_model)
+        # TODO: make this a parameter
+
 
         for mode in ['train', 'val']:
             # hack: metrics must be on self or Lightning doesn't handle their devices correctly
@@ -65,6 +68,9 @@ class S1Transformer(L.LightningModule):
                 setattr(self, f'{mode}_pred_rowwise_acc', torchmetrics.classification.Accuracy(task="binary", num_classes=2))
                 self.metrics[f'{mode}_pred_acc'] = getattr(self, f'{mode}_pred_acc')
                 self.metrics[f'{mode}_pred_rowwise_acc'] = getattr(self, f'{mode}_pred_rowwise_acc')
+
+            self.dummy_input = (torch.rand_like(torch.zeros((24, 1, d_model))) * math.sqrt(d_model)).to('cuda') # (24, 1, d_model)
+            # TODO: make this a parameter
 
         self.init_weights()
 
@@ -159,16 +165,16 @@ class S1Transformer(L.LightningModule):
 
         # VAE SEGMENT
         # prepare teacher-forcing input x: shifted with start of sequence token
-        x_tf_in = torch.cat(
-            [torch.ones((1, x_emb.shape[1], x_emb.shape[2])).to(x.device), # (1, bs, d_model)
-             x_emb[:-1, :, :]], dim=0) # (seq_len, bs, d_model)
+        first_tokens = self.dummy_first_token.repeat(1, x_emb.shape[1], 1) # (1, bs, d_model)
+        x_tf_in = torch.cat([first_tokens, x_emb[:-1, :, :]], dim=0) # (seq_len, bs, d_model)
         # decode
         x_hat = self.forward_dec(x_tf_in, x_enc, padding_mask=padding_mask) # (seq_len, bs, n_output_tokens)
         # loss
         ce_x_hat = torch.permute(x_hat, (1, 2, 0)) # (bs, n_output_tokens, seq_len)
         # scale cross-entropy sequence position
         # so that the averaging doesn't unfairly penalize longer sequences
-        ce_x_hat = ce_x_hat * torch.arange(ce_x_hat.shape[2], 0, -1).to(x.device).unsqueeze(0).unsqueeze(1) # (bs, n_output_tokens, seq_len)
+        # bug: scaling factor is not always [17 16 15 14...] - some sequences are shorter
+        # ce_x_hat = ce_x_hat * torch.arange(ce_x_hat.shape[2], 0, -1).to(x.device).unsqueeze(0).unsqueeze(1) # (bs, n_output_tokens, seq_len)
         loss = F.cross_entropy(ce_x_hat, x, ignore_index=self.pad_token_id)
         self.log(f"{mode}_vae_loss", loss)
         # accuracy
@@ -181,9 +187,9 @@ class S1Transformer(L.LightningModule):
         self.metrics[f'{mode}_vae_rowwise_acc'](x_match_row, torch.ones_like(x_match_row))
         self.log(f'{mode}_vae_rowwise_acc_step', self.metrics[f'{mode}_vae_rowwise_acc'])
 
-        if mode == 'val':
-            # decode sanity check
-            self.decode(x_enc[10,0], x[0])
+        # if mode == 'val':
+        #     # decode sanity check
+        #     self.decode(x_enc[10,0], x[0])
 
         if self.predictive:
             # PREDICTIVE SEGMENT
@@ -193,8 +199,9 @@ class S1Transformer(L.LightningModule):
             x_enc_final = x_enc[final_step, torch.arange(x_enc.shape[1]), :] # (bs, d_model)
             x_enc_final = x_enc_final.unsqueeze(0) # (1, bs, d_model)
 
-            # prepare row of ones for decoder input
-            x_pred_in = torch.ones_like(x_enc) # (seq_len, bs, d_model)
+            # prepare dummy input to prime decod
+            x_pred_in = self.dummy_input[:x_enc.shape[0], :, :].repeat(1, x_enc.shape[1], 1) # (seq_len, bs, d_model)
+
             # next step prediction
             tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(sz=x_pred_in.shape[0]).to(x_pred_in.device) # (seq_len, seq_len)
             y_pred = self.pred_dec(x_pred_in, x_enc_final, tgt_key_padding_mask=padding_mask, tgt_mask=tgt_mask, tgt_is_causal=True) # (seq_len, bs, d_model)
@@ -235,7 +242,7 @@ class S1Transformer(L.LightningModule):
         print(f"x:{x.tolist()}")
 
         # prepare teacher-forcing input x: shifted with start of sequence token
-        x_wip = torch.ones((1, 1, self.d_model)).to(x_enc.device) # (1, 1, d_model)
+        x_wip = self.dummy_first_token # (1, 1, d_model)
 
         # decode
         x_enc_shaped = x_enc.unsqueeze(0).unsqueeze(1) # (1, 1, d_model)
@@ -272,7 +279,7 @@ class S1Transformer(L.LightningModule):
     def log_and_reset_metrics(self, mode):
         for metric_name, metric in self.metrics.items():
             if metric_name.startswith(mode):
-                self.log(metric_name, metric.compute())
+                self.log(f"{metric_name}_epoch", metric.compute())
                 metric.reset()
 
     def on_train_epoch_end(self):

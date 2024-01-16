@@ -19,8 +19,8 @@ hparams = {
     'pad_token_id': 4,
 
     # dataset
-    'val_check_interval': 400, # in steps
-    'n_train': 1000000,     
+    'val_check_interval': 150, # in steps
+    'n_train': 500000,     
     'n_val': 500,     
 
     'n_automata_steps': 10,
@@ -31,8 +31,8 @@ hparams = {
 
 
 hparams['model_hparams'] = {
-    'd_model': 768,
-    'n_enc_heads': 12,
+    'd_model': 512,
+    'n_enc_heads': 8,
     'n_enc_layers': 6, 
     'n_unique_tokens': 5, # 0,1,ca_rule_0,ca_rule_1,pad
     'n_output_tokens': 2, # 0,1
