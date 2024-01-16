@@ -81,7 +81,7 @@ class System2(nn.Module):
         """
 
         # concat s1_proposal and wm_current, push through transformer
-        enc_in  = torch.cat([s1_proposed, wm_current], dim=0) # (seq_len*3, bs, d_model)
+        enc_in  = torch.cat([s1_proposed, wm_current], dim=0) # (seq_len*3, bs, d_model) # FIXME [km]: do we want to have current working memory when we view problem?
         padding_mask = torch.cat([padding_mask, padding_mask, padding_mask], dim=1) # (bs, seq_len*3)
         enc_out = self.transformer_encoder(enc_in, src_key_padding_mask=padding_mask) # (seq_len*3, bs, d_model)
 

@@ -38,7 +38,7 @@ class ToyDataset(torch.utils.data.Dataset):
                 cur_row.append(self.tokenize(ca_sequence[i]) + \
                                [ca_rule_token_map[ca_rule]])
             cur_row.append(self.tokenize(ca_sequence[-1]) + \
-                           [ca_rule_token_map[30]]) # dummy final rule - for now, map to pad token for simplicty
+                           [ca_rule_token_map[30]]) # d3ummy final rule - for now, map to pad token for simplicty
 
             self.data.append(cur_row)
 
