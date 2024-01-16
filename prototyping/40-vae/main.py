@@ -15,13 +15,13 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 16,
+    'bs': 64,
     'pad_token_id': 4,
 
     # dataset
     'val_check_interval': 400, # in steps
-    'n_train': 50000,     
-    'n_val': 400,     
+    'n_train': 1000000,     
+    'n_val': 500,     
 
     'n_automata_steps': 10,
 }
@@ -31,9 +31,9 @@ hparams = {
 
 
 hparams['model_hparams'] = {
-    'd_model': 512,
-    'n_enc_heads': 4,
-    'n_enc_layers': 4, 
+    'd_model': 768,
+    'n_enc_heads': 12,
+    'n_enc_layers': 6, 
     'n_unique_tokens': 5, # 0,1,ca_rule_0,ca_rule_1,pad
     'n_output_tokens': 2, # 0,1
     'lr': 1e-4,
@@ -41,6 +41,7 @@ hparams['model_hparams'] = {
     'weight_decay': 0.1,
     'max_steps': hparams['n_automata_steps'],
     'pad_token_id': hparams['pad_token_id'],
+    'predictive': True,
 }
 
 
@@ -56,7 +57,7 @@ dl_train = data.DataLoader(ds_train, batch_size=hparams['bs'], collate_fn=collat
 dl_val = data.DataLoader(ds_val, batch_size=hparams['bs'], collate_fn=collate_fn)
 
 # model
-basic_model = model.BPTTTransformer(**hparams['model_hparams'])
+basic_model = model.S1Transformer(**hparams['model_hparams'])
 # basic_model = model.BPTTTransformer.load_from_checkpoint("lightning_logs/15zxa4h3/checkpoints/epoch=18-step=57850.ckpt")
 
 # training
