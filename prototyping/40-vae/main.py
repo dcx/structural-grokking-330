@@ -42,6 +42,7 @@ hparams['model_hparams'] = {
     'max_steps': hparams['n_automata_steps'],
     'pad_token_id': hparams['pad_token_id'],
     'predictive': True,
+    'dropout': 0.0,
 }
 
 
@@ -59,6 +60,16 @@ dl_val = data.DataLoader(ds_val, batch_size=hparams['bs'], collate_fn=collate_fn
 # model
 basic_model = model.S1Transformer(**hparams['model_hparams'])
 # basic_model = model.BPTTTransformer.load_from_checkpoint("lightning_logs/15zxa4h3/checkpoints/epoch=18-step=57850.ckpt")
+
+# checkpointing
+checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
+    monitor='train_loss',
+    every_n_train_steps=2500,
+    dirpath='../checkpoints',
+    filename='model-{epoch:02d}-{step:08d}',
+    save_top_k=3,
+    mode='min',
+)
 
 # training
 trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 

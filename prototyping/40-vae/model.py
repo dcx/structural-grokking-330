@@ -31,7 +31,7 @@ class S1Transformer(L.LightningModule):
       Otherwise n_model_dims is too high, may create rotary embedding / precision issues
     """
 
-    def __init__(self, d_model, n_enc_heads, n_enc_layers, n_unique_tokens, n_output_tokens, lr, weight_decay, pad_token_id, max_steps, predictive):
+    def __init__(self, d_model, n_enc_heads, n_enc_layers, n_unique_tokens, n_output_tokens, lr, weight_decay, pad_token_id, max_steps, predictive, dropout):
         super().__init__()
         self.save_hyperparameters()
 
@@ -42,10 +42,11 @@ class S1Transformer(L.LightningModule):
         self.max_steps = max_steps
         self.predictive = predictive
         self.metrics = {}
+        self.dropout = dropout
 
         # transformer-based VAE
-        self.enc = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu'), num_layers=n_enc_layers)
-        self.dec = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu'), num_layers=n_enc_layers)
+        self.enc = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout), num_layers=n_enc_layers)
+        self.dec = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout), num_layers=n_enc_layers)
         self.linear = nn.Linear(d_model, n_output_tokens)
         self.embedding = nn.Embedding(n_unique_tokens, d_model, padding_idx=pad_token_id)
         self.dummy_first_token = (torch.rand_like(torch.zeros((1, 1, d_model))) * math.sqrt(d_model)).to('cuda') # (1, 1, d_model)
@@ -60,7 +61,7 @@ class S1Transformer(L.LightningModule):
             self.metrics[f'{mode}_vae_rowwise_acc'] = getattr(self, f'{mode}_vae_rowwise_acc')
 
         if self.predictive:
-            self.pred_dec = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu'), num_layers=n_enc_layers)
+            self.pred_dec = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout), num_layers=n_enc_layers)
             self.pred_linear = nn.Linear(d_model, n_output_tokens)
             for mode in ['train', 'val']:
                 # hack: metrics must be on self or Lightning doesn't handle their devices correctly
