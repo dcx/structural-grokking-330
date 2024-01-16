@@ -72,9 +72,20 @@ class BPTTTransformer(L.LightningModule):
         """
         # push through decoder
 
-        # get number of non-pad timesteps of x_enc
-        x_enc_steps = torch.sum(~padding_mask, dim=1) # (bs,)
+        # get number of non-pad timesteps of x_enc, by batch and by sequence
+        n_enc_steps_batch = torch.sum(~padding_mask, dim=1) # (bs,)
 
+        # setup x_enc_parallel
+        x_enc_parallel = torch.zeros_like(x_enc) # (seq_len, bs, d_model)
+        for i in range(x_enc.shape[1]): # for each batch
+            n_valid_steps = n_enc_steps_batch[i]
+            for j in range(n_valid_steps): # for each timestep
+                # choose a random subset of x_enc from [j:n_valid_steps]
+                # and average them
+                n_possible_steps = n_valid_steps - j
+                n_steps_to_average = random.randint(1, n_possible_steps)
+                steps_to_average = random.sample(range(j, n_valid_steps), n_steps_to_average)
+                x_enc_parallel[j,i,:] = torch.mean(x_enc[steps_to_average,i,:], dim=0)
 
         # setup masks
         # tgt_mask: standard causal mask (word 3 can see words 1 and 2)
@@ -85,18 +96,12 @@ class BPTTTransformer(L.LightningModule):
              padding_mask[:, :-1]], dim=1).bool() # (bs, seq_len-1)
 
         # memory mask (T,S): 
-        # every word in the target decoder sequence gets one randomly selected x_enc
-        # in the source memory it's allowed to attend to.
-        memory_mask = torch.ones(x_enc.shape[0], x_enc.shape[0]).to(x_enc.device).bool() # (seq_len, seq_len)
-        for i in range(x_enc.shape[0]):
-            # random choice: for x_3, we can use any of x_enc_3, x_enc_4, x_enc_5, etc.
-            # (but not x_enc_0, x_enc_1, x_enc_2)
-            choice_from = torch.arange(i, x_enc.shape[0]).to(x_enc.device) # (seq_len,)
-            choice = torch.randint(0, choice_from.shape[0], (1,)).to(x_enc.device) # (1,)
-            memory_mask[i, choice_from[choice]] = False # (seq_len, seq_len)
+        # every word in the target decoder sequence gets exactly one word in the source memory
+        # (which we've prepared to be an average of a random subset of x_enc's)
+        memory_mask = torch.diag(torch.ones(x_enc.shape[0])).to(x_enc.device).bool() # (seq_len, seq_len)
 
         # run decoder
-        x_dec = self.dec(x_tf_in, x_enc, 
+        x_dec = self.dec(x_tf_in, x_enc_parallel, 
                          tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask,
                          memory_mask=memory_mask,
                          tgt_is_causal=True) # (seq_len, bs, d_model)
