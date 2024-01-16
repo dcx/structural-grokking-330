@@ -29,6 +29,9 @@ class BPTTTransformer(L.LightningModule):
         self.linear = nn.Linear(d_model, n_output_tokens)
         self.embedding = nn.Embedding(n_unique_tokens, d_model, padding_idx=pad_token_id)
 
+        self.pred_dec = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu'), num_layers=n_enc_layers)
+        self.pred_linear = nn.Linear(d_model, n_output_tokens)
+
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_unique_tokens, ignore_index=pad_token_id)
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_unique_tokens, ignore_index=pad_token_id)
         self.train_rowwise_acc = torchmetrics.classification.Accuracy(task="binary", num_classes=2)
@@ -40,6 +43,8 @@ class BPTTTransformer(L.LightningModule):
         initrange = 0.1
         self.linear.bias.data.zero_()
         self.linear.weight.data.uniform_(-initrange, initrange)
+        self.pred_linear.bias.data.zero_()
+        self.pred_linear.weight.data.uniform_(-initrange, initrange)
 
     def forward_enc(self, x: torch.Tensor, padding_mask: torch.Tensor=None) -> torch.Tensor:
         """
@@ -76,6 +81,7 @@ class BPTTTransformer(L.LightningModule):
         n_enc_steps_batch = torch.sum(~padding_mask, dim=1) # (bs,)
 
         # setup x_enc_parallel
+        # TODO: Parallelize this
         x_enc_parallel = torch.zeros_like(x_enc) # (seq_len, bs, d_model)
         for i in range(x_enc.shape[1]): # for each batch
             n_valid_steps = n_enc_steps_batch[i]
@@ -85,7 +91,7 @@ class BPTTTransformer(L.LightningModule):
                 n_possible_steps = n_valid_steps - j
                 n_steps_to_average = random.randint(1, n_possible_steps)
                 steps_to_average = random.sample(range(j, n_valid_steps), n_steps_to_average)
-                x_enc_parallel[j,i,:] = torch.mean(x_enc[steps_to_average,i,:], dim=0)
+                x_enc_parallel[j,i,:] = torch.mean(x_enc[steps_to_average,i,:], dim=0) # (d_model,)
 
         # setup masks
         # tgt_mask: standard causal mask (word 3 can see words 1 and 2)
@@ -99,6 +105,7 @@ class BPTTTransformer(L.LightningModule):
         # every word in the target decoder sequence gets exactly one word in the source memory
         # (which we've prepared to be an average of a random subset of x_enc's)
         memory_mask = torch.diag(torch.ones(x_enc.shape[0])).to(x_enc.device).bool() # (seq_len, seq_len)
+        memory_mask = ~memory_mask # (seq_len, seq_len)
 
         # run decoder
         x_dec = self.dec(x_tf_in, x_enc_parallel, 
@@ -200,41 +207,37 @@ class BPTTTransformer(L.LightningModule):
 
         # x is first step, y is n_steps later
         x = b[:, 0, :] # (bs, seq_len)
-        # y = b[:, n_steps, :] # (bs, seq_len)
+        y = b[:, n_steps, :] # (bs, seq_len)
         padding_mask = padding_mask[:, 0, :] # (bs, seq_len)
 
         # encode
         x_emb, x_enc = self.forward_enc(x, padding_mask=padding_mask) # (seq_len, bs, d_model)
 
+        # VAE SEGMENT
         # prepare teacher-forcing input x: shifted with start of sequence token
         x_tf_in = torch.cat(
             [torch.ones((1, x_emb.shape[1], x_emb.shape[2])).to(x.device), # (1, bs, d_model)
              x_emb[:-1, :, :]], dim=0) # (seq_len, bs, d_model)
-
         # decode
         y_hat = self.forward_dec(x_tf_in, x_enc, padding_mask=padding_mask) # (seq_len, bs, n_output_tokens)
-
         # loss
         ce_y_hat = torch.permute(y_hat, (1, 2, 0)) # (bs, n_output_tokens, seq_len)
         # scale cross-entropy sequence position
         # so that the averaging doesn't unfairly penalize longer sequences
         ce_y_hat = ce_y_hat * torch.arange(ce_y_hat.shape[2], 0, -1).to(x.device).unsqueeze(0).unsqueeze(1) # (bs, n_output_tokens, seq_len)
-
-    
         loss = F.cross_entropy(ce_y_hat, x, ignore_index=self.pad_token_id)
         self.log("train_loss", loss)
-
         # accuracy
         y_pred = torch.argmax(y_hat, dim=2).T # (bs, seq_len)
         self.train_acc(y_pred, x)
         self.log('train_acc_step', self.train_acc)
-
         # rowwise accuracy: do we get the whole row right?
         y_match = (y_pred == x) | (x == self.pad_token_id)
         y_match_row = y_match.all(dim=1).long() # (bs,)
         self.train_rowwise_acc(y_match_row, torch.ones_like(y_match_row))
         self.log('train_rowwise_acc_step', self.train_rowwise_acc)
 
+        # PREDICTIVE SEGMENT
 
         return loss
     
@@ -247,30 +250,27 @@ class BPTTTransformer(L.LightningModule):
 
         # x is first step, y is n_steps later
         x = b[:, 0, :] # (bs, seq_len)
-        # y = b[:, n_steps, :] # (bs, seq_len)
+        y = b[:, n_steps, :] # (bs, seq_len)
         padding_mask = padding_mask[:, 0, :] # (bs, seq_len)
 
         # encode
         x_emb, x_enc = self.forward_enc(x, padding_mask=padding_mask) # (seq_len, bs, d_model)
 
+        # VAE SEGMENT
         # prepare teacher-forcing input x: shifted with start of sequence token
         x_tf_in = torch.cat(
             [torch.ones((1, x_emb.shape[1], x_emb.shape[2])).to(x.device), # (1, bs, d_model)
              x_emb[:-1, :, :]], dim=0) # (seq_len, bs, d_model)
-
         # decode
         y_hat = self.forward_dec(x_tf_in, x_enc, padding_mask=padding_mask) # (seq_len, bs, n_output_tokens)
-
         # loss
         ce_y_hat = torch.permute(y_hat, (1, 2, 0)) # (bs, n_output_tokens, seq_len)
         loss = F.cross_entropy(ce_y_hat, x, ignore_index=self.pad_token_id)
         self.log("val_loss", loss)
-
         # accuracy
         y_pred = torch.argmax(y_hat, dim=2).T # (bs, seq_len)
         self.val_acc(y_pred, x)
         self.log('val_acc_step', self.train_acc)
-
         # rowwise accuracy: do we get the whole row right?
         y_match = (y_pred == x) | (x == self.pad_token_id)
         y_match_row = y_match.all(dim=1).long() # (bs,)
@@ -302,7 +302,7 @@ class BPTTTransformer(L.LightningModule):
         
         # without teacher forcing
         for i in range(self.max_steps):
-            # project pxadding mask and encode
+            # project padding mask and encode
             padding_mask = torch.zeros((x_wip.shape[1], x_wip.shape[0]), dtype=torch.bool).to(x_enc.device) # (bs, seq_len)
             x_enc_proj = x_enc_shaped.repeat(x_wip.shape[0], x_wip.shape[1], 1) # (seq_len, bs, d_model)
 
