@@ -3,8 +3,8 @@ import os, random
 from datasets import load_dataset
 import tokenizers
 
-#dataset_path = '../data/chess/lichess_100mb.csv'
-dataset_path = '/dev/shm/lichess_100mb.csv'
+dataset_path = '../data/chess/lichess_6gb.csv'
+# dataset_path = '/dev/shm/lichess_100mb.csv'
 
 
 # define data format
@@ -55,7 +55,7 @@ tokenizer = tokenizers.Tokenizer(tokenizer_model)
 #     if len(tok[0]) > 1: 
 #         print(tok)
 
-# Split('', behavior="isolated", invert=True)
+tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Split('', behavior="isolated", invert=True)
 tokenizer.enable_padding(pad_id=pad_token_id) # do not pad when tokenizing at the load step
 
 def tokenize_csv_rows(rows):
@@ -85,7 +85,7 @@ def make_datasets(n_train, n_val, random_seed=2357):
     """
     dataset = load_dataset("csv", data_files=dataset_path, split=f"train[:{n_train+n_val}]")
 
-    dataset = dataset.map(tokenize_csv_rows, batched=True, num_proc=4, load_from_cache_file=False)
+    dataset = dataset.map(tokenize_csv_rows, batched=True, num_proc=24) # , load_from_cache_file=False)
     dataset = dataset.select_columns(["input_ids", "lengths"])
     dataset.set_format(type="torch", columns=["input_ids", "lengths"])
 
