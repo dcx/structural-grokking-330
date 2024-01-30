@@ -62,7 +62,7 @@ basic_model = model.S1Transformer.load_from_checkpoint("../checkpoints/epoch=1-s
 
 # checkpointing
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='train_loss',
+    monitor='train_vae_loss',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
     filename='model-{epoch:02d}-{step:08d}',
