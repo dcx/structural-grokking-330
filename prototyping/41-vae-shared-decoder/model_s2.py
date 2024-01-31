@@ -26,9 +26,15 @@ class S2Model(nn.Module):
 
         self.n_bptt = n_bptt
 
-        # transformer encoder for thinking
-        self.enc = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
+        # models for translating to and from BPTT format
+        self.enc_in = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        #self.dec_out = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         self.linear = nn.Linear(d_model, n_tokens)
+
+        # encoder for recursive thinking (BPTT)
+        self.enc_bptt = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
         self.init_weights()
 
     def init_weights(self):
@@ -49,13 +55,15 @@ class S2Model(nn.Module):
         # each x_enc represents an entire game sequence, so predict with a single token per batch: (1, bs*seq_len, d_model)
         x_enc_long = x_enc.reshape(1, -1, d_model) # (1, bs*seq_len, d_model)
 
+        # encode for BPTT
+        x_enc_long = self.enc_bptt(x_enc_long) # (1, bs*seq_len, d_model)
+        # do recursive thinking
         for i in range(self.n_bptt):
-            # make prediction
             x_enc_long = self.enc(x_enc_long) # (1, bs*seq_len, d_model)
+            y_pred_cur = self.linear(x_enc_long) # (1, bs*seq_len, n_tokens)
+            y_pred_cur = y_pred_cur.reshape(seq_len, bs, -1) # (seq_len, bs, n_tokens)
+            y_pred[i] = y_pred_cur
 
-        y_pred_cur = self.linear(x_enc_long) # (1, bs*seq_len, n_tokens)
-        y_pred_cur = y_pred_cur.reshape(seq_len, bs, -1) # (seq_len, bs, n_tokens)
-        y_pred[3] = y_pred_cur
         return y_pred # (n_bptt, seq_len, bs, n_tokens)
 
 
@@ -72,7 +80,7 @@ class S2Transformer(L.LightningModule):
         self.predictive = predictive
         self.metrics = {}
         self.dropout = dropout
-        self.n_bptt = 4
+        self.n_bptt = 1
 
         # freeze s1_model
         self.s1_model = s1_model
@@ -87,6 +95,8 @@ class S2Transformer(L.LightningModule):
         for mode in ['train', 'val']: # hack: metrics must be on self or Lightning doesn't handle their devices correctly
             setattr(self, f'{mode}_pred_acc', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
             self.metrics[f'{mode}_pred_acc'] = getattr(self, f'{mode}_pred_acc')
+            setattr(self, f'{mode}_pred_acc_bptt0', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
+            self.metrics[f'{mode}_pred_acc_bptt0'] = getattr(self, f'{mode}_pred_acc_bptt0')
 
 
 
@@ -116,11 +126,18 @@ class S2Transformer(L.LightningModule):
         loss = F.cross_entropy(y_pred[-1], y, ignore_index=self.pad_token_id)
         self.log(f"{mode}_pred_loss", loss) 
 
-        # accuracy: measure only on the last prediction
+        # accuracy: measure only on first, last prediction
         y_pred_range = y_pred[-1] # (bs, n_tokens, seq_len)
         y_hat = torch.argmax(y_pred_range, dim=1) # (bs, seq_len)
-        self.metrics[f'{mode}_pred_acc'](y_hat, y)
+        acc_p_last = self.metrics[f'{mode}_pred_acc'](y_hat, y)
         self.log(f"{mode}_pred_acc", self.metrics[f'{mode}_pred_acc']) # a = (y[0] != y_hat[0])*~padding_mask[0]
+
+        y_pred_range_p0 = y_pred[0] # (bs, n_tokens, seq_len)
+        y_hat_p0 = torch.argmax(y_pred_range_p0, dim=1) # (bs, seq_len)
+        acc_p0 = self.metrics[f'{mode}_pred_acc_bptt0'](y_hat_p0, y)
+        self.log(f"{mode}_pred_acc_bptt0", self.metrics[f'{mode}_pred_acc_bptt0']) # a = (y[0] != y_hat[0])*~padding_mask[0]
+
+        self.log(f"{mode}_pred_s2_delta", acc_p_last - acc_p0)
 
         return loss
 

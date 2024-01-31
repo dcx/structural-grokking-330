@@ -78,14 +78,14 @@ def detokenize(id_tensor):
 
 
 # load raw CSV
-def make_datasets(n_train, n_val, random_seed=2357):
+def make_datasets(n_train, n_val, num_proc=8, random_seed=2357):
     """
     n_train: number of training examples
     n_val: number of validation examples
     """
     dataset = load_dataset("csv", data_files=dataset_path, split=f"train[:{n_train+n_val}]")
 
-    dataset = dataset.map(tokenize_csv_rows, batched=True, num_proc=24) # , load_from_cache_file=False)
+    dataset = dataset.map(tokenize_csv_rows, batched=True, num_proc=num_proc) # , load_from_cache_file=False)
     dataset = dataset.select_columns(["input_ids", "lengths"])
     dataset.set_format(type="torch", columns=["input_ids", "lengths"])
 

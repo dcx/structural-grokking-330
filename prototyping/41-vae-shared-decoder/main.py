@@ -4,7 +4,7 @@
 
 import torch, torch.nn as nn, torch.utils.data as data, torch.nn.functional as F
 import lightning as L
-import os
+import os, time
 import pandas as pd
 from pytorch_lightning.loggers import WandbLogger
 
@@ -21,6 +21,7 @@ torch.set_float32_matmul_precision('medium')
 hparams = {
     'bs': 16,
     'pad_token_id': dataset.pad_token_id,
+    'cpu_procs': 8,
 
     # dataset
     'val_check_interval': 1500, # in steps
@@ -53,12 +54,12 @@ wandb_logger.log_hyperparams(hparams)
 
 
 # setup data
-ds_train, ds_val = dataset.make_datasets(hparams['n_train'], hparams['n_val'])
+ds_train, ds_val = dataset.make_datasets(hparams['n_train'], hparams['n_val'], num_proc=hparams['cpu_procs'])
 collate_fn = dataset.collate_fn
 sampler_train = dataset.SeqLenAwareBatchSampler(ds_train, hparams['bs'], shuffle=True)
 sampler_val = dataset.SeqLenAwareBatchSampler(ds_val, hparams['bs'], shuffle=True)
-dl_train = data.DataLoader(ds_train, collate_fn=collate_fn, pin_memory=True, batch_sampler=sampler_train, num_workers=4)
-dl_val = data.DataLoader(ds_val, collate_fn=collate_fn, pin_memory=True, batch_sampler=sampler_val, num_workers=4)
+dl_train = data.DataLoader(ds_train, collate_fn=collate_fn, pin_memory=True, batch_sampler=sampler_train, num_workers=hparams['cpu_procs'])
+dl_val = data.DataLoader(ds_val, collate_fn=collate_fn, pin_memory=True, batch_sampler=sampler_val, num_workers=hparams['cpu_procs'])
 
 # model
 
@@ -74,11 +75,13 @@ else:
 
 
 # checkpointing
+time_secs = int(time.time())
+fname_prefix = f"model-s2-{time_secs}"
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
     monitor='val_pred_loss',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
-    filename='model-s2-{epoch:02d}-{step:08d}',
+    filename=fname_prefix+'-{epoch:02d}-{step:08d}',
     save_top_k=3,
     mode='min',
 )
