@@ -8,7 +8,7 @@ import os
 import pandas as pd
 from pytorch_lightning.loggers import WandbLogger
 
-import model, dataset
+import model, model_s2, dataset
 
 # wandb setup
 wandb_logger = WandbLogger(log_model=False)
@@ -26,6 +26,10 @@ hparams = {
     'val_check_interval': 1500, # in steps
     'n_train': 5000000,     
     'n_val': 256,     
+
+    # model
+    's1_checkpoint': "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train
+    's2_mode': True,
 }
 # reminder: unlike main framework, here we are plugging test into val
 # because Lightning (correctly) doesn't have a test step during training
@@ -57,15 +61,24 @@ dl_train = data.DataLoader(ds_train, collate_fn=collate_fn, pin_memory=True, bat
 dl_val = data.DataLoader(ds_val, collate_fn=collate_fn, pin_memory=True, batch_sampler=sampler_val, num_workers=4)
 
 # model
-# basic_model = model.S1Transformer(**hparams['model_hparams'])
-basic_model = model.S1Transformer.load_from_checkpoint("../checkpoints/epoch=1-step=17625.ckpt")
+
+if hparams['s1_checkpoint'] is None:
+    s1_model = model.S1Transformer(**hparams['model_hparams'])
+else:
+    s1_model = model.S1Transformer.load_from_checkpoint(hparams['s1_checkpoint'])
+
+if hparams['s2_mode']:
+    main_model = model_s2.S2Transformer(s1_model, **hparams['model_hparams'])
+else:
+    main_model = s1_model
+
 
 # checkpointing
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='train_vae_loss',
+    monitor='val_pred_loss',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
-    filename='model-{epoch:02d}-{step:08d}',
+    filename='model-s2-{epoch:02d}-{step:08d}',
     save_top_k=3,
     mode='min',
 )
@@ -73,7 +86,7 @@ checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
 # training
 trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
                     gradient_clip_val=1.0, callbacks=[checkpoint_callback])
-trainer.fit(basic_model, dl_train, dl_val)
+trainer.fit(main_model, dl_train, dl_val)
 
 
 

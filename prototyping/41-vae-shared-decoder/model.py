@@ -6,6 +6,7 @@ import random
 import modelbasics as mb
 
 
+
 # Define entire system as a LightningModule
 class S1Transformer(L.LightningModule):
     """
