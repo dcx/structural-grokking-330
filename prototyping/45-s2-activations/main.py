@@ -19,17 +19,17 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 16,
+    'bs': 64,
     'pad_token_id': dataset.pad_token_id,
-    'cpu_procs': 4,
+    'cpu_procs': 6,
 
     # dataset
     'val_check_interval': 1500, # in steps
     'n_train': 1000000,     
     'n_val': 256,     
 
-    # model
-    's1_checkpoint': "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train
+    # model (strictly speaking, this is the old S1 model, but we're now only using it for the pretrained VAE)
+    'vae_checkpoint': "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train
     's2_mode': True,
 }
 # reminder: unlike main framework, here we are plugging test into val
@@ -41,12 +41,15 @@ hparams['model_hparams'] = {
     'n_enc_heads': 8,
     'n_enc_layers': 6, 
     'n_tokens': len(dataset.stoi), # 32 for chess
-    'lr': 5e-4,
+    'lr_s1': 1e-4,
+    'lr_s2': 1e-4,
     'weight_decay': 0.1,
     'pad_token_id': hparams['pad_token_id'],
     'predictive': True,
     'dropout': 0.0,
-    'n_bptt': 4,
+    'n_bptt': 1,
+    'max_bs': hparams['bs'],
+    'max_seq_len': 512,
 }
 
 
@@ -64,22 +67,22 @@ dl_val = data.DataLoader(ds_val, collate_fn=collate_fn, pin_memory=True, batch_s
 
 # model
 
-if hparams['s1_checkpoint'] is None:
-    s1_model = model.S1Transformer(**hparams['model_hparams'])
+if hparams['vae_checkpoint'] is None:
+    vae_model = model.S1Transformer(**hparams['model_hparams'])
 else:
-    s1_model = model.S1Transformer.load_from_checkpoint(hparams['s1_checkpoint'])
+    vae_model = model.S1Transformer.load_from_checkpoint(hparams['vae_checkpoint']).to('cuda:1')
 
 if hparams['s2_mode']:
-    main_model = model_s2.S2Transformer(s1_model, **hparams['model_hparams'])
+    main_model = model_s2.S2Transformer(vae_model, **hparams['model_hparams'])
 else:
-    main_model = s1_model
+    main_model = vae_model 
 
 
 # checkpointing
 time_secs = int(time.time())
 fname_prefix = f"model-s2-{time_secs}"
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='val_pred_loss',
+    monitor='step',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
     filename=fname_prefix+'-{epoch:02d}-{step:08d}',
@@ -89,7 +92,7 @@ checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
 
 # training
 trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
-                    gradient_clip_val=1.0, callbacks=[checkpoint_callback], devices=[0])
+                    callbacks=[checkpoint_callback], devices=[1])
 trainer.fit(main_model, dl_train, dl_val)
 
 

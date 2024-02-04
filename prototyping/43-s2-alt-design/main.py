@@ -19,7 +19,7 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 16,
+    'bs': 64,
     'pad_token_id': dataset.pad_token_id,
     'cpu_procs': 4,
 
@@ -46,7 +46,7 @@ hparams['model_hparams'] = {
     'pad_token_id': hparams['pad_token_id'],
     'predictive': True,
     'dropout': 0.0,
-    'n_bptt': 4,
+    'n_bptt': 1,
 }
 
 
@@ -79,7 +79,7 @@ else:
 time_secs = int(time.time())
 fname_prefix = f"model-s2-{time_secs}"
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='val_pred_loss',
+    monitor='step',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
     filename=fname_prefix+'-{epoch:02d}-{step:08d}',

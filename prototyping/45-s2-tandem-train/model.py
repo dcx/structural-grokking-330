@@ -250,6 +250,7 @@ class S1Transformer(L.LightningModule):
             # (each word's pred is coming from a different encoding)
             loss += loss_pred
 
+
         return loss
 
     def training_step(self, batch, batch_idx):

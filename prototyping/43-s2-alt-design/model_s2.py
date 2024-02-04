@@ -49,6 +49,8 @@ class S2Model(nn.Module):
         """
         x_enc: (seq_len, bs, d_model)
         returns y_pred: (n_bptt, seq_len, bs, n_tokens)
+
+        TODO: Why is there no pad mask?
         """
         seq_len, bs, d_model = x_enc.shape
 
@@ -93,6 +95,7 @@ class S2Transformer(L.LightningModule):
         self.metrics = {}
         self.dropout = dropout
         self.n_bptt = n_bptt
+        self.n_tokens = n_tokens
 
         # freeze s1_model
         self.s1_model = s1_model
@@ -118,29 +121,68 @@ class S2Transformer(L.LightningModule):
         padding_mask = (x==self.pad_token_id) # (bs, seq_len)
         x, y = x.to(torch.long), y.to(torch.long) # do conversion on GPU (mem bottleneck)
 
-        # Encode using S1
+        # Encode using frozen S1
         x_emb, x_enc = self.s1_model.forward_enc(x, padding_mask=padding_mask) # (seq_len, bs, d_model)
+        seq_len, bs, d_model = x_enc.shape
+
+        # Predict using frozen S1
+        x_enc_long = x_enc.reshape(1, -1, d_model) # (1, bs*seq_len, d_model)
+        y_pred_enc_long = self.s1_model.pred_enc(x_enc_long) # (1, bs*seq_len, d_model)
+        y_pred = self.s1_model.pred_linear(y_pred_enc_long) # (1, bs*seq_len, n_tokens)
+        y_pred = y_pred.reshape(seq_len, bs, -1) # (seq_len, bs, n_tokens)
+        y_pred = y_pred.permute(1, 0, 2) # (bs, seq_len, n_tokens)
+
+        # Use calibration to focus on low-confidence predictions
+        y_prob = F.softmax(y_pred, dim=2) # (bs, seq_len, n_tokens)
+        y_maxprob, y_hat = torch.max(y_prob, dim=2) # (bs, seq_len)
+
+        # grab anything < 0.95
+        threshold_conf, threshold_trim = 0.95, 0.125
+        focus_mask = torch.logical_and(y_maxprob < threshold_conf, ~padding_mask) # (bs, seq_len)
+        n_focus = focus_mask.sum()
+
+        # setup s2 inputs: trim into fixed shape
+        bs_s2 = int(bs*seq_len*threshold_trim)
+        lc_x_enc = torch.zeros(bs_s2, d_model, device=x_enc.device) + self.pad_token_id # (bs_s2, d_model)
+        lc_y_pred_enc = torch.zeros(bs_s2, d_model, device=x_enc.device) + self.pad_token_id # (bs_s2, d_model)
+        lc_y_pred = torch.zeros(bs_s2, self.n_tokens, device=x_enc.device) + self.pad_token_id # (bs_s2, n_tokens)
+        lc_y = torch.zeros(bs_s2, dtype=torch.long, device=x_enc.device) + self.pad_token_id # (bs_s2,)
+
+        lc_x_enc[:] = x_enc.transpose(0,1)[focus_mask][:bs_s2] # (bs_s2, d_model)
+        lc_y_pred_enc[:] = y_pred_enc_long.reshape(bs,seq_len,-1)[focus_mask][:bs_s2] # (bs_s2, d_model)
+        lc_y_pred[:] = y_pred[focus_mask][:bs_s2] # (bs_s2, n_tokens)
+        lc_y[:] = y[focus_mask][:bs_s2] # (bs_s2,)
+        lc_mask = lc_y == self.pad_token_id # (bs_s2,)
+
+        # log stats for low-confidence subset
+        lc_y_prob = F.softmax(lc_y_pred[:bs_s2], dim=1)
+        lc_y_prob_maxprob, lc_y_pred = lc_y_prob.max(dim=1)
+        lc_y_prob_avg_maxprob = lc_y_prob_maxprob.mean()
+        subset_acc = (lc_y_pred == lc_y)[:n_focus].float().mean()
+        self.log(f"{mode}_s1_lowconf_acc", subset_acc)
+        self.log(f"{mode}_s1_lowconf_conf", lc_y_prob_avg_maxprob)
+    
+        # reshape to fit s2 model
+        lc_x_enc = lc_x_enc.unsqueeze(0) # (1, bs_s2, d_model)
+        lc_y_pred_enc = lc_y_pred_enc.unsqueeze(0) # (1, bs_s2, d_model)
+        lc_y_pred = lc_y_pred.unsqueeze(0) # (1, bs_s2, n_tokens)
+        lc_y = lc_y.unsqueeze(1) # (bs_s2,1)
+        lc_mask = lc_mask.unsqueeze(1) # (bs_s2,1)
 
         # Predict using S2
-        y_pred = self.s2_model(x_enc) # (n_bptt, seq_len, bs, n_tokens)
+        s2_y_pred = self.s2_model(lc_x_enc) # (n_bptt, 1, bs_s2, n_tokens)
+        n_bptt, _, bs_s2, n_tokens = s2_y_pred.shape
+        s2_y_pred = s2_y_pred.permute(0,2,3,1) # (n_bptt, bs_s2, n_tokens, 1)
 
-
-        # Calculate loss
-
-        # loss
-        n_bptt, seq_len, bs, n_tokens = y_pred.shape
-        y_pred = y_pred.permute(0,2,3,1) # (n_bptt, bs, n_tokens, seq_len)
-
-        ce_y = y.repeat(self.n_bptt, 1) # (n_bptt*bs, seq_len)
-        ce_y_pred = y_pred.reshape(-1, n_tokens, seq_len) # (n_bptt*bs, n_tokens, seq_len)
-        loss = F.cross_entropy(ce_y_pred, ce_y, ignore_index=self.pad_token_id)
-        #loss = F.cross_entropy(y_pred[-1], y, ignore_index=self.pad_token_id)
-        self.log(f"{mode}_pred_loss", loss) 
+        s2_ce_y = lc_y.repeat(self.n_bptt, 1) # (n_bptt*bs_s2, 1)
+        s2_ce_y_pred = s2_y_pred.reshape(-1, n_tokens, 1) # (n_bptt*bs_s2, n_tokens, 1)
+        loss = F.cross_entropy(s2_ce_y_pred, s2_ce_y, ignore_index=self.pad_token_id)
+        self.log(f"{mode}_s2_pred_loss", loss) 
 
         # accuracy: compare first-vs-last BPTT step
-        y_hat_allsteps = torch.argmax(y_pred, dim=2) # (n_bptt,bs,seq_len)
+        s2_y_hat_allsteps = torch.argmax(s2_y_pred, dim=2) # (n_bptt,bs,seq_len)
         for i in range(self.n_bptt):
-            acc = self.metrics[f'{mode}_pred_acc_b{i:02}'](y_hat_allsteps[i], y)
+            acc = self.metrics[f'{mode}_pred_acc_b{i:02}'](s2_y_hat_allsteps[i], lc_y)
             self.log(f"{mode}_pred_acc_b{i:02}", acc)
             if i > 0:
                 self.log(f"{mode}_pred_acc_b{i:02}_delta", acc - prev_acc)
@@ -149,18 +191,22 @@ class S2Transformer(L.LightningModule):
             prev_acc = acc
         self.log(f"{mode}_pred_acc_full_delta", acc - first_acc)
 
-        # y_pred_range = y_pred[-1] # (bs, n_tokens, seq_len)
-        # y_hat = torch.argmax(y_pred_range, dim=1) # (bs, seq_len)
-        # acc_p_last = self.metrics[f'{mode}_pred_acc'](y_hat, y)
-        # self.log(f"{mode}_pred_acc", self.metrics[f'{mode}_pred_acc']) # a = (y[0] != y_hat[0])*~padding_mask[0]
+        # recombine low-conf with full set and report overall accuracy
+        s1_acc = torch.sum(torch.logical_and(y_hat == y, ~padding_mask)) / torch.sum(~padding_mask)
+        self.log(f"{mode}_s1_acc", s1_acc)
 
-        # y_pred_range_p0 = y_pred[0] # (bs, n_tokens, seq_len)
-        # y_hat_p0 = torch.argmax(y_pred_range_p0, dim=1) # (bs, seq_len)
-        # acc_p0 = self.metrics[f'{mode}_pred_acc_bptt0'](y_hat_p0, y)
-        # self.log(f"{mode}_pred_acc_bptt0", self.metrics[f'{mode}_pred_acc_bptt0']) # a = (y[0] != y_hat[0])*~padding_mask[0]
+        n_edits = min(n_focus, bs_s2)
+        edit_segment = y_pred[focus_mask] # (n_focus, n_tokens)
+        edit_segment[:bs_s2] = s2_y_pred[-1].squeeze()[:n_edits]
+        y_pred[focus_mask] = edit_segment
 
-        # self.log(f"{mode}_pred_s2_delta", acc_p_last - acc_p0)
-
+        #y_pred[focus_mask][:bs_s2] = s2_y_pred[-1].squeeze() # (bs, seq_len, n_tokens)
+        cmb_y_prob = F.softmax(y_pred, dim=2) # (bs, seq_len, n_tokens)
+        cmb_y_prob_maxprob, cmb_y_pred = cmb_y_prob.max(dim=2) # (bs, seq_len)
+        combined_acc = torch.sum(torch.logical_and(cmb_y_pred == y, ~padding_mask)) / torch.sum(~padding_mask)
+        self.log(f"{mode}_s1s2_acc", combined_acc)
+        self.log(f"{mode}_s1s2_acc_gain", combined_acc - s1_acc)
+        
         return loss
 
     def training_step(self, batch, batch_idx):
