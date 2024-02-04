@@ -22,6 +22,17 @@ class S1Model(nn.Module):
         self.pred_enc = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         self.linear = nn.Linear(d_model, n_tokens)
 
+        # setup hooks to get activations from each layer of s1_model
+        self.hooks = []
+        self.activations = [None] * n_enc_layers
+        def get_hook(i):
+            def hook(module, input, output):
+                self.activations[i] = output.reshape(1, -1, d_model) # (1, bs*seq_len, d_model)
+            return hook
+        for i in range(len(self.pred_enc.layers)):
+            self.hooks.append(self.pred_enc.layers[i].register_forward_hook(get_hook(i)))
+
+
         self.init_weights()
 
     def init_weights(self) -> None:
@@ -57,7 +68,7 @@ class S2Model(nn.Module):
     Simple start: Accepts encoded game states from VAE+S1, and predicts the next action.
     """
 
-    def __init__(self, n_bptt, d_model, n_enc_heads, n_enc_layers, n_tokens, weight_decay, pad_token_id, dropout):
+    def __init__(self, n_bptt, d_model, n_enc_heads, n_enc_layers, n_tokens, weight_decay, pad_token_id, dropout, n_s2_loops):
         super().__init__()
 
         self.n_bptt = n_bptt
@@ -67,23 +78,25 @@ class S2Model(nn.Module):
         self.pad_token_id = pad_token_id
         self.dropout = dropout
         self.n_tokens = n_tokens
+        self.n_s2_loops = n_s2_loops
 
-        # dummy_s2_starter = torch.rand_like(torch.zeros(d_model)) * math.sqrt(d_model)
-        # self.dummy_s2_starter = torch.nn.Parameter(dummy_s2_starter) # (d_model,)
+        dummy_s2_starter = torch.rand_like(torch.zeros(d_model)) * math.sqrt(d_model)
+        self.dummy_s2_starter = torch.nn.Parameter(dummy_s2_starter) # (d_model,)
 
         # models for translating to and from BPTT format
         self.enc_x_s2 = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
-        # self.dec_s2_1 = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
-        # self.dec_s2_2 = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.dec_s2_1 = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.dec_s2_2 = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         # self.linear_proj = nn.Linear(d_model, d_model)
 
-        self.dec_s2 = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        # self.dec_s2 = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         self.linear_s2 = nn.Linear(d_model, n_tokens)
 
         # # models for game thinking
         # # self.enc_bptt = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         # self.enc_step1 = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         # self.dec_bptt = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads*2, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
 
         self.init_weights()
 
@@ -92,7 +105,7 @@ class S2Model(nn.Module):
         self.linear_s2.bias.data.zero_()
         self.linear_s2.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, x_enc: torch.Tensor, s1_activations: torch.Tensor, s1_model) -> torch.Tensor:
+    def forward(self, x_enc: torch.Tensor, s1_model) -> torch.Tensor:
         """
         x_enc: (1, bs*seq_len, d_model)
         s1_activations: (n_enc_layers, bs*seq_len, d_model)
@@ -103,15 +116,25 @@ class S2Model(nn.Module):
         """
         _, bs_sl, d_model = x_enc.shape
 
-        # cut down activations (bs might be smaller than max_bs)
-        s1_activations = s1_activations[:, :bs_sl] # (n_enc_layers, bs*seq_len, d_model)
+        # prep s2 state
+        cur_x_enc = x_enc # (1, bs_sl, d_model)
+        s2_state = self.dummy_s2_starter.clone().repeat(1, bs_sl, 1) # (1, bs_sl, d_model)
 
-        # translate x_enc into s2 format
-        s2_x_enc = self.enc_x_s2(x_enc) # (1, bs*seq_len, d_model)
+        for i in range(self.n_s2_loops):
+            # PHASE 1/2: make s1 query and update state
+            s2_enc = self.enc_x_s2(cur_x_enc) # (1, bs_sl, d_model)
+            s1_fwd = s1_model.pred_enc(cur_x_enc).detach() # (1, bs_sl, d_model)
+            if i == 0:
+                s1_save = s1_fwd
+            s1_activations = torch.cat(s1_model.activations, dim=0).detach() # (n_layers, bs_sl, d_model)
+            s2_phase_1 = self.dec_s2_1(torch.cat((s2_state, s2_enc), dim=0), s1_activations) # (2, bs_sl, d_model)
 
-        # push through s2 model
-        s2_pred_dec = self.dec_s2(s2_x_enc, s1_activations) # (1, bs*seq_len, d_model)
-        s2_pred = self.linear_s2(s2_pred_dec) # (1, bs*seq_len, n_tokens)
+            # PHASE 2/2: glance at original x_enc, make S1 query
+            s2_update = self.dec_s2_2(s2_phase_1, cur_x_enc) # (2, bs_sl, d_model)
+            s2_state = s2_update[:1] # (1, bs_sl, d_model)
+            cur_x_enc = s2_update[1:] # (1, bs_sl, d_model)
+
+        s2_pred = self.linear_s2(s1_save + s2_phase_1[-1:]) # (1, bs_sl, n_tokens)
 
         # # prep output tensor
         # # y_pred = torch.zeros(self.n_bptt, seq_len, bs, self.n_tokens, device=x_enc.device) # (n_bptt, seq_len, bs, n_tokens)
@@ -143,7 +166,7 @@ class S2Model(nn.Module):
 
 # Define entire system as a LightningModule
 class S2Transformer(L.LightningModule):
-    def __init__(self, vae_model, d_model, n_enc_heads, n_enc_layers, n_tokens, lr_s1, lr_s2, weight_decay, pad_token_id, predictive, dropout, n_bptt, max_bs, **kwargs):
+    def __init__(self, vae_model, d_model, n_enc_heads, n_enc_layers, n_tokens, lr_s1, lr_s2, weight_decay, pad_token_id, predictive, dropout, n_bptt, max_bs, n_s2_loops, **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.automatic_optimization = False
@@ -165,27 +188,16 @@ class S2Transformer(L.LightningModule):
             param.requires_grad = False
 
         self.s1_model = S1Model(d_model, n_enc_heads, n_enc_layers, n_tokens, weight_decay, pad_token_id, dropout)
-        self.s2_model = S2Model(self.n_bptt, d_model, n_enc_heads, n_enc_layers, n_tokens, weight_decay, pad_token_id, dropout)
-
-        # setup hooks to get activations from each layer of s1_model
-        self.s1_model_hooks = []
-        self.s1_model_activations = torch.zeros(n_enc_layers, max_bs*512, d_model, device=self.vae.device) # (n_enc_layers, bs*seq_len, d_model)
-        def get_hook(i):
-            def hook(module, input, output):
-                bs_sl = output.shape[1]
-                self.s1_model_activations[i, :bs_sl] = output[0] # (bs*seq_len, d_model)
-            return hook
-        for i in range(len(self.s1_model.pred_enc.layers)):
-            self.s1_model_hooks.append(self.s1_model.pred_enc.layers[i].register_forward_hook(get_hook(i)))
-
-
+        self.s2_model = S2Model(self.n_bptt, d_model, n_enc_heads, n_enc_layers, n_tokens, weight_decay, pad_token_id, dropout, n_s2_loops)
 
         # metrics
         for mode in ['train', 'val']: # hack: metrics must be on self or Lightning doesn't handle their devices correctly
             setattr(self, f'{mode}_s1_acc', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
             self.metrics[f'{mode}_s1_acc'] = getattr(self, f'{mode}_s1_acc')
-            setattr(self, f'{mode}_s2_acc', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
-            self.metrics[f'{mode}_s2_acc'] = getattr(self, f'{mode}_s2_acc')
+            setattr(self, f'{mode}_s2_lc_acc', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
+            self.metrics[f'{mode}_s2_lc_acc'] = getattr(self, f'{mode}_s2_lc_acc')
+            setattr(self, f'{mode}_cmb_acc', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
+            self.metrics[f'{mode}_cmb_acc'] = getattr(self, f'{mode}_cmb_acc')
 
 
     def model_step(self, batch, batch_idx, mode='train'):
@@ -235,21 +247,36 @@ class S2Transformer(L.LightningModule):
             s1_lr_sched.step()
 
         # ===========================
+        # Pull out low-confidence predictions
+        # ===========================
+
+        s2_fraction = 0.25
+        n_lc = int(bs*seq_len*s2_fraction)
+        s1_prob = F.softmax(s1_pred_enc, dim=2) # (1, bs*seq_len, n_tokens)
+        s1_maxprob, _ = torch.max(s1_prob, dim=2) # (1, bs*seq_len)
+        s1_maxprob_nonpad = s1_maxprob * ~padding_mask.squeeze(1) # (1, bs*seq_len)
+
+        s1_max_idxs = torch.argsort(s1_maxprob_nonpad, descending=True, dim=1)[:,:n_lc] # (n_lc,)
+        lc_x_enc = x_enc[:,s1_max_idxs[0]] # (1, n_lc, d_model)
+        lc_y = y.T.reshape(-1)[s1_max_idxs[0]] # (n_lc,)
+
+
+        # ===========================
         # Predict, optimize S2 model
         # ===========================
 
-        s2_pred = self.s2_model(x_enc, self.s1_model_activations.detach(), self.s1_model) # (1, bs*seq_len, n_tokens)
+        s2_lc_pred = self.s2_model(lc_x_enc, self.s1_model) # (1, n_lc, n_tokens)
 
-        s2_pred = s2_pred.reshape(seq_len, bs, -1) # (seq_len, bs, n_tokens)
-        s2_pred = s2_pred.permute(1, 0, 2) # (bs, seq_len, n_tokens)
+        #s2_pred = s2_pred.reshape(seq_len, bs, -1) # (seq_len, bs, n_tokens)
+        #s2_pred = s2_pred.permute(1, 0, 2) # (bs, seq_len, n_tokens)
 
-        s2_pred_ce = torch.permute(s2_pred, (0, 2, 1)) # (bs, n_tokens, seq_len)
-        s2_loss = F.cross_entropy(s2_pred_ce, y, ignore_index=self.pad_token_id)
+        s2_lc_pred_ce = s2_lc_pred.squeeze(0) # (n_lc, n_tokens)
+        s2_loss = F.cross_entropy(s2_lc_pred_ce, lc_y, ignore_index=self.pad_token_id)
 
         # log stats
-        _, s2_y_hat = torch.max(s2_pred_ce, dim=1) # (bs*seq_len,)
-        s2_acc = self.metrics[f'{mode}_s2_acc'](s2_y_hat, y)
-        self.log(f"{mode}_s2_acc", s2_acc)
+        _, s2_lc_y_hat = torch.max(s2_lc_pred_ce, dim=1) # (n_lc,)
+        s2_lc_acc = self.metrics[f'{mode}_s2_lc_acc'](s2_lc_y_hat, lc_y)
+        self.log(f"{mode}_s2_lc_acc", s2_lc_acc)
 
         # optimize
         if mode == 'train':
@@ -259,89 +286,15 @@ class S2Transformer(L.LightningModule):
             s2_opt.step()
             s2_lr_sched.step()
 
-
-        # # Predict using frozen S1
-        # x_enc_long = x_enc.reshape(1, -1, d_model) # (1, bs*seq_len, d_model)
-        # y_pred_enc_long = self.s1_model.pred_enc(x_enc_long) # (1, bs*seq_len, d_model)
-        # y_pred = self.s1_model.pred_linear(y_pred_enc_long) # (1, bs*seq_len, n_tokens)
-        # y_pred = y_pred.reshape(seq_len, bs, -1) # (seq_len, bs, n_tokens)
-        # y_pred = y_pred.permute(1, 0, 2) # (bs, seq_len, n_tokens)
-
-        # # Use calibration to focus on low-confidence predictions
-        # y_prob = F.softmax(y_pred, dim=2) # (bs, seq_len, n_tokens)
-        # y_maxprob, y_hat = torch.max(y_prob, dim=2) # (bs, seq_len)
-
-        # # grab anything < 0.95
-        # threshold_conf, threshold_trim = 0.95, 0.125
-        # focus_mask = torch.logical_and(y_maxprob < threshold_conf, ~padding_mask) # (bs, seq_len)
-        # n_focus = focus_mask.sum()
-
-        # # setup s2 inputs: trim into fixed shape
-        # bs_s2 = int(bs*seq_len*threshold_trim)
-        # lc_x_enc = torch.zeros(bs_s2, d_model, device=x_enc.device) + self.pad_token_id # (bs_s2, d_model)
-        # lc_y_pred_enc = torch.zeros(bs_s2, d_model, device=x_enc.device) + self.pad_token_id # (bs_s2, d_model)
-        # lc_y_pred = torch.zeros(bs_s2, self.n_tokens, device=x_enc.device) + self.pad_token_id # (bs_s2, n_tokens)
-        # lc_y = torch.zeros(bs_s2, dtype=torch.long, device=x_enc.device) + self.pad_token_id # (bs_s2,)
-
-        # lc_x_enc[:] = x_enc.transpose(0,1)[focus_mask][:bs_s2] # (bs_s2, d_model)
-        # lc_y_pred_enc[:] = y_pred_enc_long.reshape(bs,seq_len,-1)[focus_mask][:bs_s2] # (bs_s2, d_model)
-        # lc_y_pred[:] = y_pred[focus_mask][:bs_s2] # (bs_s2, n_tokens)
-        # lc_y[:] = y[focus_mask][:bs_s2] # (bs_s2,)
-        # lc_mask = lc_y == self.pad_token_id # (bs_s2,)
-
-        # # log stats for low-confidence subset
-        # lc_y_prob = F.softmax(lc_y_pred[:bs_s2], dim=1)
-        # lc_y_prob_maxprob, lc_y_pred = lc_y_prob.max(dim=1)
-        # lc_y_prob_avg_maxprob = lc_y_prob_maxprob.mean()
-        # subset_acc = (lc_y_pred == lc_y)[:n_focus].float().mean()
-        # self.log(f"{mode}_s1_lowconf_acc", subset_acc)
-        # self.log(f"{mode}_s1_lowconf_conf", lc_y_prob_avg_maxprob)
-    
-        # # reshape to fit s2 model
-        # lc_x_enc = lc_x_enc.unsqueeze(0) # (1, bs_s2, d_model)
-        # lc_y_pred_enc = lc_y_pred_enc.unsqueeze(0) # (1, bs_s2, d_model)
-        # lc_y_pred = lc_y_pred.unsqueeze(0) # (1, bs_s2, n_tokens)
-        # lc_y = lc_y.unsqueeze(1) # (bs_s2,1)
-        # lc_mask = lc_mask.unsqueeze(1) # (bs_s2,1)
-
-        # # Predict using S2
-        # s2_y_pred = self.s2_model(lc_x_enc, lc_y_pred_enc) # (n_bptt, 1, bs_s2, n_tokens)
-        # n_bptt, _, bs_s2, n_tokens = s2_y_pred.shape
-        # s2_y_pred = s2_y_pred.permute(0,2,3,1) # (n_bptt, bs_s2, n_tokens, 1)
-
-        # s2_ce_y = lc_y.repeat(self.n_bptt, 1) # (n_bptt*bs_s2, 1)
-        # s2_ce_y_pred = s2_y_pred.reshape(-1, n_tokens, 1) # (n_bptt*bs_s2, n_tokens, 1)
-        # loss = F.cross_entropy(s2_ce_y_pred, s2_ce_y, ignore_index=self.pad_token_id)
-        # self.log(f"{mode}_s2_pred_loss", loss) 
-
-        # # accuracy: compare first-vs-last BPTT step
-        # s2_y_hat_allsteps = torch.argmax(s2_y_pred, dim=2) # (n_bptt,bs,seq_len)
-        # for i in range(self.n_bptt):
-        #     acc = self.metrics[f'{mode}_pred_acc_b{i:02}'](s2_y_hat_allsteps[i], lc_y)
-        #     self.log(f"{mode}_pred_acc_b{i:02}", acc)
-        #     if i > 0:
-        #         self.log(f"{mode}_pred_acc_b{i:02}_delta", acc - prev_acc)
-        #     elif i == 0:
-        #         first_acc = acc
-        #     prev_acc = acc
-        # self.log(f"{mode}_pred_acc_full_delta", acc - first_acc)
-
-        # # recombine low-conf with full set and report overall accuracy
-        # s1_acc = torch.sum(torch.logical_and(y_hat == y, ~padding_mask)) / torch.sum(~padding_mask)
-        # self.log(f"{mode}_s1_acc", s1_acc)
-
-        # n_edits = min(n_focus, bs_s2)
-        # edit_segment = y_pred[focus_mask] # (n_focus, n_tokens)
-        # edit_segment[:bs_s2] = s2_y_pred[-1].squeeze()[:n_edits]
-        # y_pred[focus_mask] = edit_segment
-
-        # #y_pred[focus_mask][:bs_s2] = s2_y_pred[-1].squeeze() # (bs, seq_len, n_tokens)
-        # cmb_y_prob = F.softmax(y_pred, dim=2) # (bs, seq_len, n_tokens)
-        # cmb_y_prob_maxprob, cmb_y_pred = cmb_y_prob.max(dim=2) # (bs, seq_len)
-        # combined_acc = torch.sum(torch.logical_and(cmb_y_pred == y, ~padding_mask)) / torch.sum(~padding_mask)
-        # self.log(f"{mode}_s1s2_acc", combined_acc)
-        # self.log(f"{mode}_s1s2_acc_gain", combined_acc - s1_acc)
+        # recombine with S1 preds to report overall accuracy
+        cmb_y_hat = s1_y_hat.T.reshape(-1) # (bs*seq_len,)
+        cmb_y_hat[s1_max_idxs[0]] = s2_lc_y_hat # (bs*seq_len,)
+        cmb_acc = self.metrics[f'{mode}_cmb_acc'](cmb_y_hat, y.T.reshape(-1))
+        self.log(f"{mode}_cmb_acc", cmb_acc)
         
+        self.log(f"{mode}_loss_delta", s1_loss - s2_loss)
+        self.log(f"{mode}_acc_delta", cmb_acc - s1_acc)
+
         self.log_dict({"s1_loss": s1_loss, "s2_loss": s2_loss}, prog_bar=True)
 
     def training_step(self, batch, batch_idx):
