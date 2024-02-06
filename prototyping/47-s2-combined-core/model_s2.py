@@ -79,8 +79,8 @@ class S2Model(nn.Module):
         self.dropout = dropout
         self.n_tokens = n_tokens
 
-        dummy_s2_starter = torch.rand_like(torch.zeros(d_model)) * math.sqrt(d_model)
-        self.dummy_s2_starter = torch.nn.Parameter(dummy_s2_starter) # (d_model,)
+        #dummy_s2_starter = torch.rand_like(torch.zeros(d_model)) * math.sqrt(d_model)  # warning: this rand only returns positive
+        #self.dummy_s2_starter = torch.nn.Parameter(dummy_s2_starter) # (d_model,)
 
         # models for translating to and from BPTT format
         self.enc_x_s2 = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
@@ -103,6 +103,8 @@ class S2Model(nn.Module):
         initrange = 0.1
         self.linear_s2.bias.data.zero_()
         self.linear_s2.weight.data.uniform_(-initrange, initrange)
+
+        self.dummy_s2_starter.data.uniform_(-initrange, initrange)
 
     def forward(self, x_enc: torch.Tensor, s1_model) -> torch.Tensor:
         """
@@ -180,6 +182,7 @@ class S2Transformer(L.LightningModule):
         self.n_bptt = n_bptt
         self.n_tokens = n_tokens
         self.bptt_every_loop = bptt_every_loop
+        self.initrange = 0.1
 
         # freeze pre-trained vae
         self.vae = vae_model
@@ -192,22 +195,32 @@ class S2Transformer(L.LightningModule):
         d_vae=128
 
         self.in_linear = nn.Linear(d_vae, d_model*self.loop_d_scale)
-        self.in_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*in_h_scale, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers*2)
-        self.loop_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.in_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*in_h_scale, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.loop_model = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         self.pred_in_linear = nn.Linear(d_model*self.loop_d_scale, d_model)
-        self.pred_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
+        self.backprop_to_ingest = True
+
+        self.n_preds = 1
         self.pred_linear = nn.Linear(d_model, n_tokens)
+        if self.n_preds > 1:
+            self.pred_tf = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+            dummy_s2_starters = (torch.rand_like(torch.zeros(self.n_preds,1,d_model)) * (self.initrange*2)) - self.initrange
+            self.dummy_s2_starters = torch.nn.Parameter(dummy_s2_starters) # (n_preds,1,d_model)
+        else:
+            self.pred_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
 
         # metrics
         for mode in ['train', 'val']: # hack: metrics must be on self or Lightning doesn't handle their devices correctly
-            for i in range(n_bptt):
+            for i in range(n_bptt+int(self.backprop_to_ingest)):
                 setattr(self, f'{mode}_acc_{i}', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
                 self.metrics[f'{mode}_acc_{i}'] = getattr(self, f'{mode}_acc_{i}')
 
         self.init_weights()
 
     def init_weights(self):
-        initrange = 0.1
+        initrange = self.initrange
         self.in_linear.bias.data.zero_()
         self.in_linear.weight.data.uniform_(-initrange, initrange)
 
@@ -216,7 +229,6 @@ class S2Transformer(L.LightningModule):
 
         self.pred_linear.bias.data.zero_()
         self.pred_linear.weight.data.uniform_(-initrange, initrange)
-
 
     def model_step(self, batch, batch_idx, mode='train'):
         s1_opt = self.optimizers()
@@ -239,43 +251,71 @@ class S2Transformer(L.LightningModule):
         padding_mask = padding_mask.reshape(-1,1) # (bs*seq_len,1)
 
         # translate VAE inputs into internal format
-        x_wip = self.in_linear(x_enc) # (1, bs*seq_len, 2*d_model)
-        x_wip = self.in_model(x_wip) # (1, bs*seq_len, 2*d_model)
+        x_in = self.in_linear(x_enc) # (1, bs*seq_len, 2*d_model)
+        x_in = self.in_model(x_in) # (1, bs*seq_len, 2*d_model)
+        x_wip = x_in
 
 
         # prep tensor to hold loop results
         x_loops = torch.zeros(self.n_bptt, 1, bs*seq_len, self.d_model*self.loop_d_scale, device=self.device) # (n_bptt, 1, bs*seq_len, 2*d_model)
 
         # run loop model n_loops times
-        s1_loss = torch.tensor(0.0, device=self.device)
         for i in range(self.n_bptt):
-            x_wip = x_wip + self.loop_model(x_wip) # (1, bs*seq_len, 2*d_model)
+            x_wip = x_wip + self.loop_model(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
             x_loops[i] = x_wip
             # x_wip = x_loops[i]
 
+        
+        bpti = 0
+        if self.backprop_to_ingest:
+            x_loops = torch.cat((x_in.unsqueeze(0), x_loops), dim=0) # (n_bptt+1, 1, bs*seq_len, 2*d_model)
+            bpti = 1
+
         # downsize to prediction format
-        x_loops = self.pred_in_linear(x_loops) # (n_bptt, 1, bs*seq_len, d_model)
+        x_loops = self.pred_in_linear(x_loops) # (n_bptt+bpti, 1, bs*seq_len, d_model)
 
         # translate internal format into prediction
-        x_loops = x_loops.transpose(0, 1).reshape(1, -1, d_model) # (1, n_bptt*bs*seq_len, d_model)
-        s1_pred_enc = self.pred_model(x_loops) # (1, n_bptt*bs*seq_len, d_model)
-        s1_pred = self.pred_linear(s1_pred_enc) # (1, n_bptt*bs*seq_len, n_tokens)
+        x_loops = x_loops.transpose(0, 1).reshape(1, -1, d_model) # (1, (n_bptt+bpti)*bs*seq_len, d_model)
 
+        if self.n_preds > 1:
+            s1_pred_model_out = self.pred_tf(self.dummy_s2_starters.repeat(1,(self.n_bptt+bpti)*bs*seq_len,1), x_loops) # (n_preds, n_bptt*bs*seq_len, d_model)
+        else:
+            s1_pred_model_out = self.pred_model(x_loops) # (n_preds=1, n_bptt*bs*seq_len, d_model)
+
+        s1_pred = self.pred_linear(s1_pred_model_out) # (n_preds, n_bptt*bs*seq_len, n_tokens)
+        
         # calculate loss
-        s1_pred = s1_pred.reshape(self.n_bptt, seq_len, bs, -1) # (n_bptt, seq_len, bs, n_tokens)
-        s1_pred = s1_pred.permute(0, 2, 1, 3) # (n_bptt, bs, seq_len, n_tokens)
-        s1_pred = s1_pred.reshape(-1, seq_len, self.n_tokens) # (n_bptt*bs, seq_len, n_tokens)
+        s1_pred = s1_pred.reshape(self.n_preds, self.n_bptt+bpti, seq_len, bs, -1) # (n_preds, n_bptt, seq_len, bs, n_tokens)
+        s1_pred = s1_pred.permute(0, 1, 3, 2, 4) # (n_preds, n_bptt, bs, seq_len, n_tokens)
+        s1_pred = s1_pred.reshape(self.n_preds, -1, seq_len, self.n_tokens) # (n_preds, n_bptt*bs, seq_len, n_tokens)
 
-        s1_pred_ce = torch.permute(s1_pred, (0, 2, 1)) # (n_bptt*bs, n_tokens, seq_len)
-        s1_loss = F.cross_entropy(s1_pred_ce, y.repeat(self.n_bptt, 1), ignore_index=self.pad_token_id)
+        # # trim seq_len by n_preds-1 since we need this many forward
+        # s1_pred = s1_pred[:,:-self.n_preds+1] # (n_preds*n_bptt*bs, (seq_len-n_preds+1), n_tokens)
+        # # pull out y for this many forward
+        # y_fwd = y.unsqueeze(0).unsqueeze(0).repeat(self.n_preds, 1, 1, 1) # (n_preds, n_bptt, bs, seq_len)
+        # y_fwd = y_fwd[:,:,:,-self.n_preds+1] # (n_preds, n_bptt, bs, seq_len-n_preds+1)
 
+        # quick and dirty version to test if this even works
+        s1_pred_ce = s1_pred.permute(0, 1, 3, 2) # (n_preds, n_bptt*bs, n_tokens, seq_len)
+
+        s1_pred_cur = s1_pred_ce[0] # (n_bptt*bs, n_tokens, seq_len)
+        s1_loss = F.cross_entropy(s1_pred_cur, y.repeat(self.n_bptt+bpti, 1), ignore_index=self.pad_token_id)
+        for i in range(1,self.n_preds):
+            s1_pred_cur = s1_pred_ce[i][:,:,:-i] # (n_bptt*bs, n_tokens, seq_len)
+            s1_loss += F.cross_entropy(s1_pred_cur, y.repeat((self.n_bptt+bpti), 1)[:,i:], ignore_index=self.pad_token_id)
+        s1_loss /= self.n_preds
         # log stats for each loop
-        s1_pred = s1_pred.reshape(self.n_bptt*bs, seq_len, -1) # (n_bptt*bs, seq_len, n_tokens)
-        _, s1_y_hat = torch.max(s1_pred, dim=2) # (n_bptt*bs, seq_len)
-        s1_y_hat = s1_y_hat.reshape(self.n_bptt, bs, seq_len) # (n_bptt, bs, seq_len)
-        for i in range(self.n_bptt):
-            s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat[i], y)
-            self.log(f"{mode}_acc_{i}", s1_acc, sync_dist=True)
+        # s1_pred = s1_pred.reshape(self.n_bptt*bs, seq_len, -1) # (n_bptt*bs, seq_len, n_tokens)
+        _, s1_y_hat = torch.max(s1_pred, dim=3) # (n_preds, n_bptt*bs, seq_len)
+        s1_y_hat = s1_y_hat.reshape(self.n_preds, self.n_bptt+bpti, bs, seq_len) # (n_preds, n_bptt, bs, seq_len)
+        for i in range(self.n_bptt+bpti):
+            s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat[0,i], y)
+            for j in range(1,self.n_preds): 
+                s1_acc_j = self.metrics[f'{mode}_acc_{i}'](s1_y_hat[j,i][:,:-j], y[:,j:]) # compare the second prediction against the second y, but only for the tokens actually have a second y (i.e. not the last j tokens per sequence)
+                s1_acc += s1_acc_j
+            self.log(f"{mode}_acc_{i}", s1_acc/self.n_preds, sync_dist=True)
+                # s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat[i], y)
+                # self.log(f"{mode}_acc_{i}", s1_acc, sync_dist=True)
 
         #s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat, y)
         #self.log(f"{mode}_acc_{i}", s1_acc)

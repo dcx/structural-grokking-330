@@ -24,8 +24,8 @@ torch.backends.cuda.enable_flash_sdp(False)
 torch.backends.cuda.enable_math_sdp(True)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--bs", type=int, default=8, help="Batch size")
-parser.add_argument("--lr_s1", type=float, default=1e-6, help="Learning rate for S1")
+parser.add_argument("--bs", type=int, default=4, help="Batch size")
+parser.add_argument("--lr_s1", type=float, default=1e-5, help="Learning rate for S1")
 parser.add_argument("--lr_s2", type=float, default=1e-5, help="Learning rate for S2")
 parser.add_argument("--n_train", type=int, default=1000000, help="Number of training samples")
 parser.add_argument("--n_val", type=int, default=256, help="Number of validation samples")
@@ -34,7 +34,7 @@ parser.add_argument("--vae_checkpoint", type=str, default='../checkpoints/model-
 parser.add_argument("--s2_checkpoint", type=str, default=None, help="Path to checkpoint for resuming full train")
 parser.add_argument("--cpu_procs", type=int, default=6, help="Number of CPU processes")
 # parser.add_argument("--cuda_id", type=int, default=0, help="GPU to use")
-parser.add_argument("--n_bptt", type=int, default=4, help="Number of S2 inner loops")
+parser.add_argument("--n_bptt", type=int, default=16, help="Number of S2 inner loops")
 parser.add_argument("--bptt_every_loop", action="store_true", help="Backprop into each S2 loop, instead of just the last one?")
 hparams = vars(parser.parse_args())
  
@@ -58,9 +58,9 @@ hparams = vars(parser.parse_args())
 
 
 hparams['model_hparams'] = {
-    'd_model': 768,
-    'n_enc_heads': 12,
-    'n_enc_layers': 12, 
+    'd_model': 512,
+    'n_enc_heads': 8,
+    'n_enc_layers': 8,
     'n_tokens': len(dataset.stoi), # 32 for chess
     'lr_s1': hparams['lr_s1'],
     'lr_s2': hparams['lr_s2'],
@@ -116,7 +116,7 @@ print(f"Checkpoint identifier: {fname_prefix}")
 
 # training
 trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
-                    callbacks=[checkpoint_callback], devices=2) # devices=[hparams['cuda_id']])
+                    callbacks=[checkpoint_callback], devices=1) # devices=[hparams['cuda_id']])
 trainer.fit(main_model, dl_train, dl_val, ckpt_path=ckpt_path)
 
 
