@@ -35,7 +35,7 @@ parser.add_argument("--vae_checkpoint", type=str, default='../checkpoints/model-
 parser.add_argument("--s2_checkpoint", type=str, default=None, help="Path to checkpoint for resuming full train")
 parser.add_argument("--cpu_procs", type=int, default=6, help="Number of CPU processes")
 # parser.add_argument("--cuda_id", type=int, default=0, help="GPU to use")
-parser.add_argument("--n_bptt", type=int, default=8, help="Number of S2 inner loops")
+parser.add_argument("--n_bptt", type=int, default=4, help="Number of S2 inner loops")
 parser.add_argument("--d_model", type=int, default=768, help="Model dimension")
 parser.add_argument("--d_loop_feed_forward", type=int, default=3072, help="Feed forward dimension for looping transformer")
 parser.add_argument("--n_enc_layers", type=int, default=12, help="Number of encoder layers")

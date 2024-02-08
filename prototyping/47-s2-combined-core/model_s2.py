@@ -302,12 +302,14 @@ class S2Transformer(L.LightningModule):
 
         self.pred_linear = nn.Linear(d_model, n_tokens)
         if self.n_preds > 1:
-            self.pred_tf = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model, nhead=n_enc_heads, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+            self.pred_tf = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation=F.leaky_relu, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
             dummy_s2_starters = (torch.rand_like(torch.zeros(self.n_preds,1,d_model)) * (self.initrange*2)) - self.initrange
             self.dummy_s2_starters = torch.nn.Parameter(dummy_s2_starters) # (n_preds,1,d_model)
         else:
-            self.pred_model = nn.TransformerEncoder(_TransformerEncoderLayerSwiGLU(d_model=d_model, nhead=n_enc_heads, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+            self.pred_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation=F.leaky_relu, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
 
+        dummy_wm = (torch.rand_like(torch.zeros(self.n_bptt,d_model)) * (self.initrange*2)) - self.initrange # (n_bptt,d_model)
+        self.dummy_wm = torch.nn.Parameter(dummy_wm) # (n_bptt,d_model)
 
         # metrics
         for mode in ['train', 'val']: # hack: metrics must be on self or Lightning doesn't handle their devices correctly
