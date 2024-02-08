@@ -314,8 +314,8 @@ class S2Transformer(L.LightningModule):
         # metrics
         for mode in ['train', 'val']: # hack: metrics must be on self or Lightning doesn't handle their devices correctly
             for i in range(n_bptt+int(self.backprop_to_ingest)):
-                setattr(self, f'{mode}_acc_{i:02}', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
-                self.metrics[f'{mode}_acc_{i:02}'] = getattr(self, f'{mode}_acc_{i:02}')
+                setattr(self, f'{mode}_acc_{i}', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
+                self.metrics[f'{mode}_acc_{i}'] = getattr(self, f'{mode}_acc_{i}')
 
         self.init_weights()
 
@@ -383,6 +383,12 @@ class S2Transformer(L.LightningModule):
         for i in range(self.n_bptt):
             x_wip = self.loop_model(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
             x_loops[i] = x_wip
+
+        
+        bpti = 0
+        if self.backprop_to_ingest:
+            x_loops = torch.cat((x_in.unsqueeze(0), x_loops), dim=0) # (n_bptt+1, 1, bs*seq_len, 2*d_model)
+            bpti = 1
 
         
         bpti = 0
