@@ -26,30 +26,38 @@ stoi = {
 
 pad_token_id = stoi[';']
 
-# # add chess positions as separate tokens
+# add chess positions as separate tokens
 # for letter in ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']:
 #     for num in range(1, 9):
 #         position = letter + str(num)
 #         itos[len(itos)] = position
 #         stoi[position] = len(stoi)
 
-# from tokenizers import normalizers
-# from tokenizers.normalizers import NFD, StripAccents
-# normalizer = normalizers.Sequence([NFD(), StripAccents()])
-
 
 # setup tokenizer
 tokenizer_model = tokenizers.models.WordLevel(stoi)
 tokenizer = tokenizers.Tokenizer(tokenizer_model)
 
+# # strip numbers from moves: no value in predicting them
+# (doesn't work)
+# from tokenizers import normalizers
+# tokenizer.normalizer = normalizers.Sequence([
+#     normalizers.Replace("[0-9]", ""),
+# ])
+
 # tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Sequence([
 #     tokenizers.pre_tokenizers.Split(tokenizers.Regex("[a-h][1-8]"), behavior="isolated", invert=True),
-#     tokenizers.pre_tokenizers.Whitespace(),
-#     tokenizers.pre_tokenizers.Split('x', behavior="isolated"),
-#     tokenizers.pre_tokenizers.Split(tokenizers.Regex("[A-Z]"), behavior="isolated"),
-#     tokenizers.pre_tokenizers.Split(tokenizers.Regex("^[0-9]"), behavior="isolated"),
 # ])
-# test_tok = tokenizer.pre_tokenizer.pre_tokenize_str("1.e4 g6 2.d4 Bg7 3.Nc3 c5 4.Be3 cxd4 5.Bxd4 Nf6 6.f3 Nc6 7.Be3 O-O 8.Qd2 a6 9.O-O-O b5 10.Bh6 b4 11.Nd5 Bb7 12.Bxg7 Kxg7 13.h4 h5 14.g4 a5 15.Nxf6 Kxf6 16.gxh5 Rh8 17.Qg5+ Kg7 18.hxg6 f6 19.Qg3 Ne5 20.h5 Rh6 21.Nh3 Qc7 22.Nf4 Rc8 23.Rh2 a4 24.Kb1 a3 25.Qe1 axb2 26.Kxb2 Nc4+ 27.Bxc4 Qxc4 28.Rxd7 Ra8 29.Rxe7+ Kf8 30.Rf7+ Kg8 31.Qa1 Qc3+ 32.Kb1 Qe1+ 33.Kb2 Qc3+ 34.Kb1 Qe3 35.Ne6 Qg1+ 36.Kb2 Qxh2 37.Rxb7 Qe5+ 38.Kb1 Qxe6 39.Qb2 Qe5")
+# #     tokenizers.pre_tokenizers.Whitespace(),
+# #     tokenizers.pre_tokenizers.Split('x', behavior="isolated"),
+# #     tokenizers.pre_tokenizers.Split(tokenizers.Regex("[A-Z]"), behavior="isolated"),
+# #     tokenizers.pre_tokenizers.Split(tokenizers.Regex("^[0-9]"), behavior="isolated"),
+# # ])
+
+
+# sample_game = "1.e4 g6 2.d4 Bg7 3.Nc3 c5 4.Be3 cxd4 5.Bxd4 Nf6 6.f3 Nc6 7.Be3 O-O 8.Qd2 a6 9.O-O-O b5 10.Bh6 b4 11.Nd5 Bb7 12.Bxg7 Kxg7 13.h4 h5 14.g4 a5 15.Nxf6 Kxf6 16.gxh5 Rh8 17.Qg5+ Kg7 18.hxg6 f6 19.Qg3 Ne5 20.h5 Rh6 21.Nh3 Qc7 22.Nf4 Rc8 23.Rh2 a4 24.Kb1 a3 25.Qe1 axb2 26.Kxb2 Nc4+ 27.Bxc4 Qxc4 28.Rxd7 Ra8 29.Rxe7+ Kf8 30.Rf7+ Kg8 31.Qa1 Qc3+ 32.Kb1 Qe1+ 33.Kb2 Qc3+ 34.Kb1 Qe3 35.Ne6 Qg1+ 36.Kb2 Qxh2 37.Rxb7 Qe5+ 38.Kb1 Qxe6 39.Qb2 Qe5"
+# # norm_tok = tokenizer.normalizer.normalize_str(sample_game)
+# test_tok = tokenizer.pre_tokenizer.pre_tokenize_str(sample_game)
 # print(test_tok)
 # for tok in test_tok:
 #     if len(tok[0]) > 1: 
@@ -76,6 +84,12 @@ def detokenize(id_tensor):
 
 # a = tokenizer.encode(s)
 
+import re
+demoveify = re.compile(r'\s?\d+\.')
+
+def remove_move_numbers(row):
+    return {'transcript': demoveify.sub('.', row['transcript'])}
+
 
 # load raw CSV
 def make_datasets(n_train, n_val, num_proc=8, random_seed=2357):
@@ -85,6 +99,7 @@ def make_datasets(n_train, n_val, num_proc=8, random_seed=2357):
     """
     dataset = load_dataset("csv", data_files=dataset_path, split=f"train[:{n_train+n_val}]")
 
+    dataset = dataset.map(remove_move_numbers, batched=False, num_proc=num_proc) # , load_from_cache_file=False)
     dataset = dataset.map(tokenize_csv_rows, batched=True, num_proc=num_proc) # , load_from_cache_file=False)
     dataset = dataset.select_columns(["input_ids", "lengths"])
     dataset.set_format(type="torch", columns=["input_ids", "lengths"])

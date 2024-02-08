@@ -24,18 +24,26 @@ torch.backends.cuda.enable_flash_sdp(False)
 torch.backends.cuda.enable_math_sdp(True)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--bs", type=int, default=8, help="Batch size")
-parser.add_argument("--lr_s1", type=float, default=1e-6, help="Learning rate for S1")
+parser.add_argument("--bs", type=int, default=4, help="Batch size")
+parser.add_argument("--grad_acc", type=int, default=2, help="Batches to accumulate per backprop step")
+parser.add_argument("--lr_s1", type=float, default=2.5e-5, help="Learning rate for S1")
 parser.add_argument("--lr_s2", type=float, default=1e-5, help="Learning rate for S2")
 parser.add_argument("--n_train", type=int, default=1000000, help="Number of training samples")
-parser.add_argument("--n_val", type=int, default=256, help="Number of validation samples")
+parser.add_argument("--n_val", type=int, default=384, help="Number of validation samples")
 parser.add_argument("--val_check_interval", type=int, default=1500, help="Validation check interval")
 parser.add_argument("--vae_checkpoint", type=str, default='../checkpoints/model-epoch=01-step=00567500.ckpt', help="Path to VAE checkpoint")
 parser.add_argument("--s2_checkpoint", type=str, default=None, help="Path to checkpoint for resuming full train")
 parser.add_argument("--cpu_procs", type=int, default=6, help="Number of CPU processes")
 # parser.add_argument("--cuda_id", type=int, default=0, help="GPU to use")
-parser.add_argument("--n_bptt", type=int, default=4, help="Number of S2 inner loops")
+parser.add_argument("--n_bptt", type=int, default=8, help="Number of S2 inner loops")
+parser.add_argument("--d_model", type=int, default=768, help="Model dimension")
+parser.add_argument("--d_loop_feed_forward", type=int, default=3072, help="Feed forward dimension for looping transformer")
+parser.add_argument("--n_enc_layers", type=int, default=12, help="Number of encoder layers")
+parser.add_argument("--n_loop_layers", type=int, default=12, help="Number of loop layers")
+parser.add_argument("--n_enc_heads", type=int, default=12, help="Number of encoder heads")
 parser.add_argument("--bptt_every_loop", action="store_true", help="Backprop into each S2 loop, instead of just the last one?")
+parser.add_argument("--n_preds", type=int, default=1, help="Number of predictions per step. If >1, uses decoder and teacher-forcing")
+parser.add_argument("--step_bias", type=float, default=0.0, help="Impose bias to encourage later steps to do better")
 hparams = vars(parser.parse_args())
  
 # # hyperparameters
@@ -58,9 +66,11 @@ hparams = vars(parser.parse_args())
 
 
 hparams['model_hparams'] = {
-    'd_model': 768,
-    'n_enc_heads': 12,
-    'n_enc_layers': 12, 
+    'd_model': hparams['d_model'],
+    'd_loop_feed_forward': hparams['d_loop_feed_forward'],
+    'n_enc_heads': hparams['n_enc_heads'],
+    'n_enc_layers': hparams['n_enc_layers'],
+    'n_loop_layers': hparams['n_loop_layers'],
     'n_tokens': len(dataset.stoi), # 32 for chess
     'lr_s1': hparams['lr_s1'],
     'lr_s2': hparams['lr_s2'],
@@ -72,6 +82,9 @@ hparams['model_hparams'] = {
     'max_bs': hparams['bs'],
     'max_seq_len': 512,
     'bptt_every_loop': hparams['bptt_every_loop'],
+    'n_preds': hparams['n_preds'],
+    'grad_acc': hparams['grad_acc'],
+    'step_bias': hparams['step_bias'],
 }
 
 # setup data
@@ -84,12 +97,12 @@ dl_val = data.DataLoader(ds_val, collate_fn=collate_fn, pin_memory=True, num_wor
 
 # model
 
-if hparams['vae_checkpoint'] is None:
-    vae_model = model.S1Transformer(**hparams['model_hparams'])
-else:
-    vae_model = model.S1Transformer.load_from_checkpoint(hparams['vae_checkpoint']) # .to(f"cuda:{hparams['cuda_id']}")
+# if hparams['vae_checkpoint'] is None:
+#     vae_model = model.S1Transformer(**hparams['model_hparams'])
+# else:
+#     vae_model = model.S1Transformer.load_from_checkpoint(hparams['vae_checkpoint']) # .to(f"cuda:{hparams['cuda_id']}")
 
-main_model = model_s2.S2Transformer(vae_model, **hparams['model_hparams'])
+main_model = model_s2.S2Transformer(None, **hparams['model_hparams'])
 if hparams['s2_checkpoint']:
     ckpt_path = hparams['s2_checkpoint']
 else:
@@ -116,7 +129,7 @@ print(f"Checkpoint identifier: {fname_prefix}")
 
 # training
 trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
-                    callbacks=[checkpoint_callback], devices=2) # devices=[hparams['cuda_id']])
+                    callbacks=[checkpoint_callback], devices=1) # devices=[hparams['cuda_id']])
 trainer.fit(main_model, dl_train, dl_val, ckpt_path=ckpt_path)
 
 
