@@ -5,6 +5,82 @@ import torchmetrics
 import random
 import modelbasics as mb
 import pl_bolts
+import model_xf
+
+
+class _TransformerDecoderLayerSwiGLU(nn.TransformerDecoderLayer):
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        norm_first: bool = False,
+        gate_multiple_of: int = 128,
+        device=None,
+        dtype=None,
+        **_kwargs,
+    ) -> None:
+        super().__init__(
+            d_model,
+            nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=F.silu,
+            norm_first=norm_first,
+            device=device,
+            dtype=dtype,    
+        )
+        # Reference:
+        #     https://github.com/facebookresearch/llama/blob/main/llama/model.py
+        dim_feedforward = int(2 * dim_feedforward / 3)
+        dim_feedforward = gate_multiple_of * (
+            (dim_feedforward + gate_multiple_of - 1) // gate_multiple_of
+        )
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.linear3 = nn.Linear(d_model, dim_feedforward)
+
+    def _ff_block(self, x):
+        x = self.linear2(
+            self.dropout(self.activation(self.linear1(x)) * self.linear3(x))
+        )
+        return self.dropout2(x)
+
+class _TransformerEncoderLayerSwiGLU(nn.TransformerEncoderLayer):
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        norm_first: bool = False,
+        gate_multiple_of: int = 128,
+        **_kwargs,
+    ) -> None:
+        super().__init__(
+            d_model,
+            nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=F.silu,
+            norm_first=norm_first,
+        )
+        # Reference:
+        #     https://github.com/facebookresearch/llama/blob/main/llama/model.py
+        dim_feedforward = int(2 * dim_feedforward / 3)
+        dim_feedforward = gate_multiple_of * (
+            (dim_feedforward + gate_multiple_of - 1) // gate_multiple_of
+        )
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.linear3 = nn.Linear(d_model, dim_feedforward)
+
+    def _ff_block(self, x):
+        x = self.linear2(
+            self.dropout(self.activation(self.linear1(x)) * self.linear3(x))
+        )
+        return self.dropout2(x)
 
 
 class S1Model(nn.Module):
@@ -79,8 +155,8 @@ class S2Model(nn.Module):
         self.dropout = dropout
         self.n_tokens = n_tokens
 
-        dummy_s2_starter = torch.rand_like(torch.zeros(d_model)) * math.sqrt(d_model)
-        self.dummy_s2_starter = torch.nn.Parameter(dummy_s2_starter) # (d_model,)
+        #dummy_s2_starter = torch.rand_like(torch.zeros(d_model)) * math.sqrt(d_model)  # warning: this rand only returns positive
+        #self.dummy_s2_starter = torch.nn.Parameter(dummy_s2_starter) # (d_model,)
 
         # models for translating to and from BPTT format
         self.enc_x_s2 = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
@@ -103,6 +179,8 @@ class S2Model(nn.Module):
         initrange = 0.1
         self.linear_s2.bias.data.zero_()
         self.linear_s2.weight.data.uniform_(-initrange, initrange)
+
+        self.dummy_s2_starter.data.uniform_(-initrange, initrange)
 
     def forward(self, x_enc: torch.Tensor, s1_model) -> torch.Tensor:
         """
@@ -164,12 +242,13 @@ class S2Model(nn.Module):
 
 # Define entire system as a LightningModule
 class S2Transformer(L.LightningModule):
-    def __init__(self, vae_model, d_model, n_enc_heads, n_enc_layers, n_tokens, lr_s1, lr_s2, weight_decay, pad_token_id, predictive, dropout, n_bptt, max_bs, bptt_every_loop, **kwargs):
+    def __init__(self, vae_model, d_model, n_enc_heads, n_enc_layers, n_loop_layers, n_tokens, lr_s1, lr_s2, weight_decay, pad_token_id, predictive, dropout, n_bptt, max_bs, bptt_every_loop, n_preds, grad_acc, step_bias, d_loop_feed_forward, **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.automatic_optimization = False
 
         self.d_model = d_model
+        self.d_loop_feed_forward = d_loop_feed_forward
         self.lr_s1 = lr_s1
         self.lr_s2 = lr_s2
         self.wd = weight_decay
@@ -180,43 +259,74 @@ class S2Transformer(L.LightningModule):
         self.n_bptt = n_bptt
         self.n_tokens = n_tokens
         self.bptt_every_loop = bptt_every_loop
+        self.initrange = 0.1
+        self.n_preds = n_preds # number of predictions to make per token
+        self.grad_acc = grad_acc
+        self.step = 0
+        self.step_bias = step_bias
 
-        # freeze pre-trained vae
-        self.vae = vae_model
-        for param in self.vae.parameters():
-            param.requires_grad = False
+        # # freeze pre-trained vae
+        # self.vae = vae_model
+        # for param in self.vae.parameters():
+        #     param.requires_grad = False
 
         self.loop_d_scale = 1
         loop_h_scale = 1
         in_h_scale = 1
-        d_vae=128
+        # self.d_vae = 128
+        # d_vae = 128
 
-        self.in_linear = nn.Linear(d_vae, d_model*self.loop_d_scale)
-        self.in_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*in_h_scale, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers*2)
-        self.loop_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.embedding = nn.Embedding(n_tokens, d_model, padding_idx=pad_token_id)
+        #self.in_enc = nn.TransformerEncoder(_TransformerEncoderLayerSwiGLU(d_model=d_model, nhead=n_enc_heads, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.in_enc = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation=F.leaky_relu, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
+        # self.in_linear = nn.Linear(d_vae, d_model*self.loop_d_scale)
+        self.in_model = nn.TransformerEncoder(_TransformerEncoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*in_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
+        #self.loop_starter = nn.TransformerEncoder(_TransformerEncoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.loop_starter = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, activation=F.leaky_relu, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
+        # self.loop_model_1 = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        # self.loop_model_2 = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        # self.loop_model_3 = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        # self.loop_model_4 = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, nhead=n_enc_heads*loop_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        # self.loop_model = model_xf.get_decoder(d_model=d_model*self.loop_d_scale)
+        #self.loop_model = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model*self.loop_d_scale, dim_feedforward=d_loop_feed_forward, nhead=n_enc_heads*loop_h_scale, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+        self.loop_model = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model*self.loop_d_scale, dim_feedforward=d_loop_feed_forward, nhead=n_enc_heads*loop_h_scale, activation=F.leaky_relu, dropout=self.dropout, batch_first=False), num_layers=n_loop_layers)
+
         self.pred_in_linear = nn.Linear(d_model*self.loop_d_scale, d_model)
-        self.pred_model = nn.TransformerEncoder(mb.TransformerEncoderLayer(d_model=d_model, nhead=n_enc_heads, activation='gelu', dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
+
+        self.backprop_to_ingest = False # Leave as False. After testing, True starts better but eventually perf is consistently worse (0.3% absolute at the 0.77 mark)
+
+
         self.pred_linear = nn.Linear(d_model, n_tokens)
+        if self.n_preds > 1:
+            self.pred_tf = nn.TransformerDecoder(_TransformerDecoderLayerSwiGLU(d_model=d_model, nhead=n_enc_heads, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+            dummy_s2_starters = (torch.rand_like(torch.zeros(self.n_preds,1,d_model)) * (self.initrange*2)) - self.initrange
+            self.dummy_s2_starters = torch.nn.Parameter(dummy_s2_starters) # (n_preds,1,d_model)
+        else:
+            self.pred_model = nn.TransformerEncoder(_TransformerEncoderLayerSwiGLU(d_model=d_model, nhead=n_enc_heads, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
+
 
         # metrics
         for mode in ['train', 'val']: # hack: metrics must be on self or Lightning doesn't handle their devices correctly
-            for i in range(n_bptt):
-                setattr(self, f'{mode}_acc_{i}', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
-                self.metrics[f'{mode}_acc_{i}'] = getattr(self, f'{mode}_acc_{i}')
+            for i in range(n_bptt+int(self.backprop_to_ingest)):
+                setattr(self, f'{mode}_acc_{i:02}', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
+                self.metrics[f'{mode}_acc_{i:02}'] = getattr(self, f'{mode}_acc_{i:02}')
 
         self.init_weights()
 
     def init_weights(self):
-        initrange = 0.1
-        self.in_linear.bias.data.zero_()
-        self.in_linear.weight.data.uniform_(-initrange, initrange)
+        initrange = self.initrange
+        #self.in_linear.bias.data.zero_()
+        #self.in_linear.weight.data.uniform_(-initrange, initrange)
 
         self.pred_in_linear.bias.data.zero_()
         self.pred_in_linear.weight.data.uniform_(-initrange, initrange)
 
         self.pred_linear.bias.data.zero_()
         self.pred_linear.weight.data.uniform_(-initrange, initrange)
-
 
     def model_step(self, batch, batch_idx, mode='train'):
         s1_opt = self.optimizers()
@@ -227,55 +337,115 @@ class S2Transformer(L.LightningModule):
         x, y = x.to(torch.long), y.to(torch.long) # do conversion on GPU (mem bottleneck)
 
         # encode to single token with pre-trained, frozen VAE
-        x_emb, x_enc = self.vae.forward_enc(x, padding_mask=padding_mask) # (seq_len, bs, d_model)
-        seq_len, bs, d_vae = x_enc.shape
-        d_model = self.d_model
+        # x_emb, x_enc = self.vae.forward_enc(x, padding_mask=padding_mask) # (seq_len, bs, d_model)
+
+        # make causally encoded tokens
+        x_emb = self.embedding(x) # (bs, seq_len, d_model)
+        cmask = torch.nn.Transformer.generate_square_subsequent_mask(sz=x_emb.shape[1]).to(x.device) # (seq_len, seq_len)
+        x_in = self.in_enc(x_emb.transpose(0,1), src_key_padding_mask=padding_mask, is_causal=True, mask=cmask) # (seq_len, bs, d_model)
+
+        seq_len, bs, d_model = x_in.shape
 
         # since each token is its own row, convert to seq_len=1 for hygiene
         # (this makes padding irrelevant, since cross-entropy loss ignores padding tokens,
         # but it's a good habit to keep the shape consistent)
-        x_enc = x_enc.reshape(1, -1, d_vae) # (1, bs*seq_len, d_vae)
+        x_in = x_in.reshape(1, -1, d_model) # (1, seq_len*bs, d_vae)
         #y = y.reshape(-1) # (bs*seq_len,)
-        padding_mask = padding_mask.reshape(-1,1) # (bs*seq_len,1)
+        padding_mask = padding_mask.reshape(-1,1) # (seq_len*bs,1)
 
         # translate VAE inputs into internal format
-        x_wip = self.in_linear(x_enc) # (1, bs*seq_len, 2*d_model)
-        x_wip = self.in_model(x_wip) # (1, bs*seq_len, 2*d_model)
+        #x_in = self.in_linear(x_enc) # (1, bs*seq_len, 2*d_model)
+        #x_in = self.in_model(x_in) # (1, bs*seq_len, 2*d_model)
+
+        # prime the pump: take a first glance at the input and produce the internal representation
+        # for loops to come
+        x_wip = self.loop_starter(x_in) # (1, bs*seq_len, 2*d_model)
+
+        # x_in = x_enc
+        # x_wip = x_in
 
 
         # prep tensor to hold loop results
         x_loops = torch.zeros(self.n_bptt, 1, bs*seq_len, self.d_model*self.loop_d_scale, device=self.device) # (n_bptt, 1, bs*seq_len, 2*d_model)
 
-        # run loop model n_loops times
-        s1_loss = torch.tensor(0.0, device=self.device)
+        # # run loop model n_loops times
+        # x_wip = x_wip + self.loop_model_1(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
+        # x_loops[0] = x_wip
+        # x_wip = x_wip + self.loop_model_2(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
+        # x_loops[1] = x_wip
+        # x_wip = x_wip + self.loop_model_3(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
+        # x_loops[2] = x_wip
+        # x_wip = x_wip + self.loop_model_4(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
+        # x_loops[3] = x_wip
+
         for i in range(self.n_bptt):
-            x_wip = x_wip + self.loop_model(x_wip) # (1, bs*seq_len, 2*d_model)
+            x_wip = self.loop_model(x_wip, x_in) # (1, bs*seq_len, 2*d_model)
             x_loops[i] = x_wip
-            # x_wip = x_loops[i]
+
+        
+        bpti = 0
+        if self.backprop_to_ingest:
+            x_loops = torch.cat((x_in.unsqueeze(0), x_loops), dim=0) # (n_bptt+1, 1, bs*seq_len, 2*d_model)
+            bpti = 1
 
         # downsize to prediction format
-        x_loops = self.pred_in_linear(x_loops) # (n_bptt, 1, bs*seq_len, d_model)
+        x_loops = self.pred_in_linear(x_loops) # (n_bptt+bpti, 1, bs*seq_len, d_model)
 
         # translate internal format into prediction
-        x_loops = x_loops.transpose(0, 1).reshape(1, -1, d_model) # (1, n_bptt*bs*seq_len, d_model)
-        s1_pred_enc = self.pred_model(x_loops) # (1, n_bptt*bs*seq_len, d_model)
-        s1_pred = self.pred_linear(s1_pred_enc) # (1, n_bptt*bs*seq_len, n_tokens)
+        x_loops = x_loops.transpose(0, 1).reshape(1, -1, d_model) # (1, (n_bptt+bpti)*bs*seq_len, d_model)
 
+        if self.n_preds > 1:
+            s1_pred_model_out = self.pred_tf(self.dummy_s2_starters.repeat(1,(self.n_bptt+bpti)*bs*seq_len,1), x_loops) # (n_preds, n_bptt*bs*seq_len, d_model)
+        else:
+            s1_pred_model_out = self.pred_model(x_loops) # (n_preds=1, n_bptt*bs*seq_len, d_model)
+
+        s1_pred = self.pred_linear(s1_pred_model_out) # (n_preds, n_bptt*bs*seq_len, n_tokens)
+        
         # calculate loss
-        s1_pred = s1_pred.reshape(self.n_bptt, seq_len, bs, -1) # (n_bptt, seq_len, bs, n_tokens)
-        s1_pred = s1_pred.permute(0, 2, 1, 3) # (n_bptt, bs, seq_len, n_tokens)
-        s1_pred = s1_pred.reshape(-1, seq_len, self.n_tokens) # (n_bptt*bs, seq_len, n_tokens)
+        s1_pred = s1_pred.reshape(self.n_preds, self.n_bptt+bpti, seq_len, bs, -1) # (n_preds, n_bptt, seq_len, bs, n_tokens)
+        s1_pred = s1_pred.permute(0, 1, 3, 2, 4) # (n_preds, n_bptt, bs, seq_len, n_tokens)
+        s1_pred = s1_pred.reshape(self.n_preds, -1, seq_len, self.n_tokens) # (n_preds, n_bptt*bs, seq_len, n_tokens)
 
-        s1_pred_ce = torch.permute(s1_pred, (0, 2, 1)) # (n_bptt*bs, n_tokens, seq_len)
-        s1_loss = F.cross_entropy(s1_pred_ce, y.repeat(self.n_bptt, 1), ignore_index=self.pad_token_id)
+        # # trim seq_len by n_preds-1 since we need this many forward
+        # s1_pred = s1_pred[:,:-self.n_preds+1] # (n_preds*n_bptt*bs, (seq_len-n_preds+1), n_tokens)
+        # # pull out y for this many forward
+        # y_fwd = y.unsqueeze(0).unsqueeze(0).repeat(self.n_preds, 1, 1, 1) # (n_preds, n_bptt, bs, seq_len)
+        # y_fwd = y_fwd[:,:,:,-self.n_preds+1] # (n_preds, n_bptt, bs, seq_len-n_preds+1)
 
+        # step bias:((n_bppt+bpti),) where each value is (1+step_bias)^i for step
+        # e.g. if step_bias=0.1, then step_bias_multiplier = [1, 1.1, 1.21, 1.331, 1.4641, ...]
+        i_range = torch.arange(self.n_bptt+bpti, device=self.device, dtype=s1_pred.dtype) # (n_bptt+bpti,)
+        i_range = i_range.unsqueeze(1) # (n_bptt+bpti,1)
+        i_range = i_range.repeat(1,bs) # (n_bptt+bpti,bs)
+        i_range = i_range.reshape(-1) # ((n_bppt+bpti)*bs,)
+        step_bias_multiplier = (1+self.step_bias)**i_range # ((n_bppt+bpti)*bs,)
+        step_bias_multiplier = step_bias_multiplier.unsqueeze(1) # ((n_bppt+bpti)*bs,1)
+
+        # quick and dirty version to test if this even works
+        s1_pred_ce = s1_pred.permute(0, 1, 3, 2) # (n_preds, n_bptt*bs, n_tokens, seq_len)
+
+        s1_pred_cur = s1_pred_ce[0] # (n_bptt*bs, n_tokens, seq_len)
+        s1_loss = F.cross_entropy(s1_pred_cur, y.repeat(self.n_bptt+bpti, 1), ignore_index=self.pad_token_id, reduction='none') # (n_bptt*bs, seq_len)
+        s1_loss = (s1_loss * step_bias_multiplier).mean() # (1,)
+
+        for i in range(1,self.n_preds):
+            s1_pred_cur = s1_pred_ce[i][:,:,:-i] # (n_bptt*bs, n_tokens, seq_len)
+            cur_loss = F.cross_entropy(s1_pred_cur, y.repeat((self.n_bptt+bpti), 1)[:,i:], ignore_index=self.pad_token_id, reduction='none') # (n_bptt*bs, seq_len-i)
+            s1_loss += (cur_loss * step_bias_multiplier).mean() # (1,)
+
+        s1_loss /= self.n_preds
         # log stats for each loop
-        s1_pred = s1_pred.reshape(self.n_bptt*bs, seq_len, -1) # (n_bptt*bs, seq_len, n_tokens)
-        _, s1_y_hat = torch.max(s1_pred, dim=2) # (n_bptt*bs, seq_len)
-        s1_y_hat = s1_y_hat.reshape(self.n_bptt, bs, seq_len) # (n_bptt, bs, seq_len)
-        for i in range(self.n_bptt):
-            s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat[i], y)
-            self.log(f"{mode}_acc_{i}", s1_acc, sync_dist=True)
+        # s1_pred = s1_pred.reshape(self.n_bptt*bs, seq_len, -1) # (n_bptt*bs, seq_len, n_tokens)
+        _, s1_y_hat = torch.max(s1_pred, dim=3) # (n_preds, n_bptt*bs, seq_len)
+        s1_y_hat = s1_y_hat.reshape(self.n_preds, self.n_bptt+bpti, bs, seq_len) # (n_preds, n_bptt, bs, seq_len)
+        for i in range(self.n_bptt+bpti):
+            s1_acc = self.metrics[f'{mode}_acc_{i:02}'](s1_y_hat[0,i], y)
+            for j in range(1,self.n_preds): 
+                s1_acc_j = self.metrics[f'{mode}_acc_{i:02}'](s1_y_hat[j,i][:,:-j], y[:,j:]) # compare the second prediction against the second y, but only for the tokens actually have a second y (i.e. not the last j tokens per sequence)
+                s1_acc += s1_acc_j
+            self.log(f"{mode}_acc_{i:02}", s1_acc/self.n_preds, sync_dist=True)
+                # s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat[i], y)
+                # self.log(f"{mode}_acc_{i}", s1_acc, sync_dist=True)
 
         #s1_acc = self.metrics[f'{mode}_acc_{i}'](s1_y_hat, y)
         #self.log(f"{mode}_acc_{i}", s1_acc)
@@ -306,8 +476,11 @@ class S2Transformer(L.LightningModule):
             s1_opt.zero_grad()
             self.manual_backward(s1_loss)
             torch.nn.utils.clip_grad_norm_(self.parameters(), 5.0)
-            s1_opt.step()
-            s1_lr_sched.step()
+            if self.step % self.grad_acc == 0:
+                s1_opt.step()
+                s1_lr_sched.step()
+
+            self.step = (self.step + 1) % self.grad_acc
 
         self.log_dict({"s1_loss": s1_loss}, prog_bar=True, sync_dist=True)
 
