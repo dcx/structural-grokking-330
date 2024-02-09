@@ -31,6 +31,7 @@ class S2Transformer(L.LightningModule):
         self.n_preds = n_preds # number of predictions to make per token
         self.grad_acc = grad_acc
         self.step = 0
+        self.step_s1s2 = 0
         self.step_bias = step_bias
 
         # # freeze pre-trained vae
@@ -70,6 +71,7 @@ class S2Transformer(L.LightningModule):
 
         self.pred_linear = nn.Linear(d_model, n_tokens)
         self.pred_linear_s2proj = nn.Linear(n_tokens, d_model)
+        self.s2_act_compress = nn.Linear(len(self.s1.layers)*d_model, d_model)
         # if self.n_preds > 1:
         #     self.pred_tf = nn.TransformerDecoder(mb.TransformerDecoderLayer(d_model=d_model, nhead=n_enc_heads, activation=F.leaky_relu, dropout=self.dropout, batch_first=False), num_layers=n_enc_layers)
         #     dummy_s2_starters = (torch.rand_like(torch.zeros(self.n_preds,1,d_model)) * (self.initrange*2)) - self.initrange
@@ -102,7 +104,7 @@ class S2Transformer(L.LightningModule):
         self.init_weights()
 
         self.s1_params = list(self.s1.parameters()) + list(self.in_enc.parameters()) + list(self.embedding.parameters()) + list(self.pred_linear.parameters())
-        self.s2_params = list(self.s2.parameters()) + [self.dummy_wm] + list(self.pred_linear_s2proj.parameters())
+        self.s2_params = list(self.s2.parameters()) + [self.dummy_wm] + list(self.pred_linear_s2proj.parameters()) + list(self.s2_act_compress.parameters())
 
 
     def init_weights(self):
@@ -118,6 +120,9 @@ class S2Transformer(L.LightningModule):
 
         self.pred_linear_s2proj.bias.data.zero_()
         self.pred_linear_s2proj.weight.data.uniform_(-initrange, initrange)
+
+        self.s2_act_compress.bias.data.zero_()
+        self.s2_act_compress.weight.data.uniform_(-initrange, initrange)
 
     def model_step(self, batch, batch_idx, mode='train'):
         s1_opt, s2_opt = self.optimizers()
@@ -162,7 +167,7 @@ class S2Transformer(L.LightningModule):
         _, s1_y_hat = torch.max(s1_pred_ce, dim=1) # (bs, seq_len)
         s1_acc = self.metrics[f'{mode}_acc_00'](s1_y_hat, y)
         # optimize
-        if mode == 'train':
+        if mode == 'train' and self.step_s1s2 == 0:
             s1_opt.zero_grad()
             self.manual_backward(s1_loss)
             torch.nn.utils.clip_grad_norm_(self.s1_params, 5.0)
@@ -173,11 +178,12 @@ class S2Transformer(L.LightningModule):
         # freeze s1_model
         for param in self.s1.parameters():
             param.requires_grad = False
-        # grab s1 activations
-        s1_acts = torch.cat(self.activations, dim=0).detach() # (n_enc_layers, bs*seq_len, d_model)
+        # grab s1 activations and compress down
+        s1_acts = torch.cat(self.activations, dim=2).detach() # (1, bs*seq_len, d_model*n_enc_layers)
+        s1_acts = self.s2_act_compress(s1_acts) # (1, bs*seq_len, d_model)
         s1_linear_preds = self.pred_linear_s2proj(s1_pred).detach() # (1, bs*seq_len, d_model)
 
-        s1_data = torch.cat((x_in, s1_acts, s1_linear_preds), dim=0).detach() # (n_enc_layers+2, bs*seq_len, d_model
+        s1_data = torch.cat((x_in, s1_acts, s1_linear_preds), dim=0).detach() # (3, bs*seq_len, d_model)
         # s2: predict a better S1 input
         s2_starter = self.dummy_wm.repeat(1,bs*seq_len,1) # (1, bs*seq_len, d_model)
         s2_new_s1 = self.s2(s2_starter, s1_data) # (1, bs*seq_len, d_model)
@@ -203,6 +209,7 @@ class S2Transformer(L.LightningModule):
                 s2_lr_sched.step()
 
             self.step = (self.step + 1) % self.grad_acc
+            self.step_s1s2 = (self.step_s1s2 + 1) % 2
 
         self.log_dict({"s1_loss": s1_loss, "s2_loss": s2_loss, "s1_acc": s1_acc, "s2_acc": s2_acc}, prog_bar=True, sync_dist=True)
 
