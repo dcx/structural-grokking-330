@@ -3,7 +3,7 @@ import os, random
 from datasets import load_dataset
 import tokenizers
 
-dataset_path = 'data_utils/ds_addmult_mod10_data/data-addmult-231102-1.5m.csv'
+dataset_path = '../../data/test-step-am-2000.csv'
 # dataset_path = '/dev/shm/lichess_100mb.csv'
 
 
@@ -50,17 +50,9 @@ def tokenize_csv_rows(rows):
     tok_ids = [t.ids for t in tokenized]
     lengths = [len(t.ids) for t in tokenized]
     answers = rows['ans_mod10']
-
-    subitems_tok = tokenizer.encode_batch(rows['next_action_tight'])
-    tok_ids_subitem = [t.ids for t in subitems_tok]
-    lengths_subitem = [len(t.ids) for t in subitems_tok]
-    answers_subitem = rows['next_action_res']
-
-    #ans_sublabels = tokenizer.encode_batch(rows['ans_sublabels'])
-    #ans_sublabels = [t.ids for t in ans_sublabels]
-    return {'input_ids': tok_ids, 'lengths': lengths, 'answers': answers,
-            'input_ids_subitem': tok_ids_subitem, 'lengths_subitem': lengths_subitem, 'answers_subitem': answers_subitem}
-        # 'ans_sublabels': ans_sublabels}
+    ans_sublabels = tokenizer.encode_batch(rows['ans_sublabels'])
+    ans_sublabels = [t.ids for t in ans_sublabels]
+    return {'input_ids': tok_ids, 'lengths': lengths, 'answers': answers, 'ans_sublabels': ans_sublabels}
 
 def detokenize(id_tensor):
     return tokenizer.decode_batch(id_tensor.tolist())
