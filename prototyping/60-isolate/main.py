@@ -19,29 +19,29 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 4,
+    'bs': 128,
     'pad_token_id': dataset.pad_token_id,
     'cpu_procs': 8,
 
     # dataset
-    'val_check_interval': 1500, # in steps
-    'n_train': 6400,     
-    'n_val': 512,     
+    'val_check_interval': 1000, # in steps
+    'n_train': None, # 12800,     
+    'n_val': 1024,     
 
     # model
     's1_checkpoint': None, # "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train
-    's2_mode': False,
+    's2_mode': True,
 }
 # reminder: unlike main framework, here we are plugging test into val
 # because Lightning (correctly) doesn't have a test step during training
 
 
 hparams['model_hparams'] = {
-    'd_model': 384,
+    'd_model': 540,
     'n_enc_heads': 12,
-    'n_enc_layers': 12, 
+    'n_enc_layers': 8, 
     'n_tokens': len(dataset.stoi), # 32 for chess
-    'lr': 5e-5,
+    'lr': 1e-4,
     'weight_decay': 0.1,
     'pad_token_id': hparams['pad_token_id'],
     'predictive': True,
@@ -64,22 +64,22 @@ dl_val = data.DataLoader(ds_val, collate_fn=collate_fn, pin_memory=True, num_wor
 
 # model
 
-if hparams['s1_checkpoint'] is None:
-    s1_model = model.S1Transformer(**hparams['model_hparams'])
-else:
-    s1_model = model.S1Transformer.load_from_checkpoint(hparams['s1_checkpoint'])
+# if hparams['s1_checkpoint'] is None:
+#     s1_model = model.S1Transformer(**hparams['model_hparams'])
+# else:
+#     s1_model = model.S1Transformer.load_from_checkpoint(hparams['s1_checkpoint'])
 
-if hparams['s2_mode']:
-    main_model = model_s2.S2Transformer(s1_model, **hparams['model_hparams'])
-else:
-    main_model = s1_model
+#if hparams['s2_mode']:
+main_model = model_s2.S2Transformer(**hparams['model_hparams'])
+#else:
+#    main_model = s1_model
 
 
 # checkpointing
 time_secs = int(time.time())
 fname_prefix = f"model-s1-{time_secs}"
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
-    monitor='val_pred_loss',
+    monitor='step',
     every_n_train_steps=2500,
     dirpath='../checkpoints',
     filename=fname_prefix+'-{epoch:02d}-{step:08d}',
