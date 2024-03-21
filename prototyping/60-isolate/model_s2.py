@@ -65,6 +65,10 @@ class S2Transformer(L.LightningModule):
             setattr(self, f'{mode}_xnext_vae_acc', torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_tokens, ignore_index=pad_token_id))
             self.metrics[f'{mode}_xnext_vae_acc'] = getattr(self, f'{mode}_xnext_vae_acc')
 
+            setattr(self, f'{mode}_xnext_vae_acc_rw', torchmetrics.classification.Accuracy(task="binary", num_classes=2))
+            self.metrics[f'{mode}_xnext_vae_acc_rw'] = getattr(self, f'{mode}_xnext_vae_acc_rw')
+
+
 
         self.init_weights()
 
@@ -210,8 +214,12 @@ class S2Transformer(L.LightningModule):
         xnext_hat = torch.argmax(xnext_pred_out, dim=2) # (bs, seq_len_xnext)
         acc = self.metrics[f'{mode}_xnext_vae_acc'](xnext_hat, xnext)
         self.log(f"{mode}_05_xnext_vae_acc", acc, prog_bar=False)
-    
 
+        # rowwise accuracy
+        xnext_hat_rw = (xnext_hat == xnext).all(dim=1)
+        acc = self.metrics[f'{mode}_xnext_vae_acc_rw'](xnext_hat_rw, torch.ones_like(xnext_hat_rw))
+        self.log(f"{mode}_05_xnext_vae_acc_rw", acc, prog_bar=False)
+        
         return loss
 
 
