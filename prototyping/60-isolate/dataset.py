@@ -3,7 +3,7 @@ import os, random
 from datasets import load_dataset
 import tokenizers
 
-dataset_path = '../data/test-step-amli-500k-d4.csv'
+dataset_path = '../data/test-step-am-250k-d4.csv'
 # dataset_path = '/dev/shm/lichess_100mb.csv'
 
 
