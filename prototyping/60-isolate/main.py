@@ -24,9 +24,9 @@ hparams = {
     'cpu_procs': 8,
 
     # dataset
-    'val_check_interval': 1000, # in steps
+    'val_check_interval': 1500, # in steps
     'n_train': None, # 12800,     
-    'n_val': 1024,     
+    'n_val': 2048,     
 
     # model
     's1_checkpoint': None, # "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train

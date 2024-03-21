@@ -216,9 +216,9 @@ class S2Transformer(L.LightningModule):
         self.log(f"{mode}_05_xnext_vae_acc", acc, prog_bar=False)
 
         # rowwise accuracy
-        xnext_hat_rw = (xnext_hat == xnext).all(dim=1)
+        xnext_hat_rw = torch.logical_or(xnext_hat == xnext, xnext == self.pad_token_id).all(dim=1)
         acc = self.metrics[f'{mode}_xnext_vae_acc_rw'](xnext_hat_rw, torch.ones_like(xnext_hat_rw))
-        self.log(f"{mode}_05_xnext_vae_acc_rw", acc, prog_bar=False)
+        self.log(f"{mode}_06_xnext_vae_acc_rw", acc, prog_bar=False)
         
         return loss
 

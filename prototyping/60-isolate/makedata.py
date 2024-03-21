@@ -99,7 +99,7 @@ def make_data(out_file, n_examples, max_height, min_height=1, stepwise=False, en
                         }
 
                         # current action is based on current working state
-                        if op in ['+', '*', '<', '=', '>']:
+                        if op in ['+', '*', '<', '=', '>', 'I', 'L']:
                             step_data['cur_action_tight'] = cur_working_state[x:y].replace(' ', '')
                             step_data['cur_action_aligned'] = ' '*x + cur_working_state[x:y] + ' '*(len(cur_working_state)-y)
                             step_data['cur_action_type'] = op
@@ -234,7 +234,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('../data/test-step-am-250k-d4.csv', 250000, min_height=2, max_height=4, n_processes=8, stepwise=True, enable_for=False, enable_let=False, enable_if=False, step_vars=True)
+    make_data_mp('../data/test-step-amli-500k-d4.csv', 500000, min_height=2, max_height=4, n_processes=8, stepwise=True, enable_for=False, enable_let=True, enable_if=True, step_vars=True)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')
