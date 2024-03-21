@@ -91,7 +91,7 @@ class S2Transformer(L.LightningModule):
 
 
     def model_step(self, batch, batch_idx, mode='train'):
-        x, y, xnext, xsi, ysi = batch # (bs, seq_len)
+        depth, x, y, xnext, xsi, ysi = batch # (bs, seq_len)
         padding_mask = (x==self.pad_token_id) # (bs, seq_len)
         padding_mask_xt = (xnext==self.pad_token_id) # (bs, seq_len_xt)
         x, y = x.to(torch.long), y.to(torch.long) # do conversion on GPU (mem bottleneck)
@@ -189,7 +189,7 @@ class S2Transformer(L.LightningModule):
 
         # COMBINE: delta + pred -> next state
         ysi_enc = self.embedding(ysi.unsqueeze(0)) * math.sqrt(self.d_model) # (1, bs, d_model)
-        xnext_enc = self.combine_dec(x_enc, torch.cat([xt_enc,ysi_enc],dim=0)) # (1, bs, d_model)
+        xnext_enc = self.combine_dec(x_enc, torch.cat([xt_enc, ysi_enc], dim=0)) # (1, bs, d_model)
         # teacher-force decode vs xnext
         padding_mask_xnext = (xnext==self.pad_token_id) # (bs, seq_len_xnext)
         xnext_emb = self.embedding(xnext.T) * math.sqrt(self.d_model) # (seq_len_xnext, bs, d_model)
