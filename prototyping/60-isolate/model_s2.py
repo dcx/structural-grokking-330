@@ -147,7 +147,7 @@ class S2Transformer(L.LightningModule):
         # pull out the specific subaction (e.g. (*3(+23)) -> (+23))
         xt_enc = self.extract_enc(x_enc) # (1, bs, d_model)
         # delta: make a view of the state ready to be combined with the next action (e.g. (*3(+23)) -> (*3????))
-        xt_delta_enc = self.cleancut_dec(x_enc, xt_enc) # (1, bs, d_model) 
+        # xt_delta_enc = self.cleancut_dec(x_enc, xt_enc) # (1, bs, d_model) 
 
         # xt-decode: teacher-force extract
         xt_emb = self.embedding(xsi.T) * math.sqrt(self.d_model) # (seq_len_xt, bs, d_model)
@@ -189,7 +189,7 @@ class S2Transformer(L.LightningModule):
 
         # COMBINE: delta + pred -> next state
         ysi_enc = self.embedding(ysi.unsqueeze(0)) * math.sqrt(self.d_model) # (1, bs, d_model)
-        xnext_enc = self.combine_dec(xt_delta_enc, ysi_enc) # (1, bs, d_model)
+        xnext_enc = self.combine_dec(x_enc, torch.cat([xt_enc,ysi_enc],dim=0)) # (1, bs, d_model)
         # teacher-force decode vs xnext
         padding_mask_xnext = (xnext==self.pad_token_id) # (bs, seq_len_xnext)
         xnext_emb = self.embedding(xnext.T) * math.sqrt(self.d_model) # (seq_len_xnext, bs, d_model)
