@@ -234,7 +234,7 @@ def make_data_mp(out_file, n_examples, max_height, min_height=1, n_processes=1, 
 
 if __name__ == '__main__':
     random.seed(42)
-    make_data_mp('../data/test-nostep-am-500k-d46.csv', 500000, min_height=4, max_height=6, n_processes=8, stepwise=False, enable_for=False, enable_let=False, enable_if=False, step_vars=True)
+    make_data_mp('../data/test-nostep-am-2m-d25.csv', 2000000, min_height=2, max_height=5, n_processes=8, stepwise=False, enable_for=False, enable_let=False, enable_if=False, step_vars=True)
 
     # # setup
     # parser = lark.Lark(interpret.calc_grammar, start='expr')

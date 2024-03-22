@@ -19,18 +19,18 @@ torch.set_float32_matmul_precision('medium')
 
 # hyperparameters
 hparams = {
-    'bs': 32,
+    'bs': 128,
     'pad_token_id': dataset.pad_token_id,
     'cpu_procs': 8,
 
     # dataset
-    'val_check_interval': 1500, # in steps
+    'val_check_interval': 150, # in steps
     'n_train': None, # 12800,     
-    'n_val': 2048,     
+    'n_val': 512,     
 
     # model
-    'pt1_checkpoint': None, # "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train
-    'pt2_mode': False,
+    'pt1_checkpoint': None, # "../checkpoints/model-1711078733-epoch=00-step=00012500.ckpt", # "../checkpoints/model-epoch=01-step=00567500.ckpt", # None for fresh train
+    'pt2_mode': False, #True, # True,
 }
 # reminder: unlike main framework, here we are plugging test into val
 # because Lightning (correctly) doesn't have a test step during training
@@ -41,7 +41,7 @@ hparams['model_hparams'] = {
     'n_enc_heads': 12,
     'n_enc_layers': 8, 
     'n_tokens': len(dataset.stoi), # 32 for chess
-    'lr': 5e-5,
+    'lr': 1e-4,
     'weight_decay': 0.1,
     'pad_token_id': hparams['pad_token_id'],
     'predictive': True,
@@ -76,19 +76,35 @@ else:
 
 # checkpointing
 time_secs = int(time.time())
-fname_prefix = f"model-s1-{time_secs}"
+fname_prefix = f"model-{time_secs}"
 checkpoint_callback = L.pytorch.callbacks.ModelCheckpoint(
     monitor='step',
-    every_n_train_steps=2500,
+    every_n_train_steps=1250,
     dirpath='../checkpoints',
     filename=fname_prefix+'-{epoch:02d}-{step:08d}',
     save_top_k=3,
-    mode='min',
+    mode="max",
 )
 
 # training
 trainer = L.Trainer(accelerator='gpu', logger=wandb_logger, val_check_interval=hparams['val_check_interval'], 
                     gradient_clip_val=1.0, callbacks=[checkpoint_callback], devices=[0])
+
+
+
+
+# LR finder
+# from lightning.pytorch.tuner import Tuner
+# tuner = Tuner(trainer)
+# lr_finder = tuner.lr_find(model)
+# print(lr_finder.results)
+# # Plot with
+# fig = lr_finder.plot(suggest=True)
+# fig.show()
+# new_lr = lr_finder.suggestion()
+# print(new_lr)
+
+
 trainer.fit(main_model, dl_train, dl_val)
 
 

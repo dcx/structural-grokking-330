@@ -3,15 +3,18 @@ import os, random
 from datasets import load_dataset
 import tokenizers
 
-dataset_path = '../data/test-nostep-am-500k-d46.csv'
+dataset_path = '../data/test-nostep-am-2m-d25.csv'
 # dataset_path = '/dev/shm/lichess_100mb.csv'
 
 
 # define data format
-supported_chars = '0123456789+*()[]abcxyzLFI<=_'
+supported_chars = '0123456789+*()[]abcxyzLFI<=_XZ'
 itos = {i:c for i, c in enumerate(supported_chars)}
 stoi = {c:i for i, c in enumerate(supported_chars)}
 pad_token_id = stoi['_']
+bad_token_id = stoi['X'] # invalid input
+eos_token_id = stoi['Z'] # end of sequence
+max_sym_token_id = stoi['='] # all token ids from this onwards are control symbols (not seen in input data)
 
 # # add chess positions as separate tokens
 # for letter in ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']:
@@ -158,8 +161,9 @@ def collate_fn(batch):
         #batch_sl[i,:lengths[i]] = b['ans_sublabels']
 
     batch_heights = torch.stack([x['heights'] for x in batch])
+    lengths = torch.tensor(lengths, dtype=torch.int32)
 
-    return batch_heights, batch_x, batch_y # , batch_xnext, batch_xsi, batch_ysi
+    return batch_heights, lengths, batch_x, batch_y # , batch_xnext, batch_xsi, batch_ysi
 
 
 
