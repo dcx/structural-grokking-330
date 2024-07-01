@@ -5,4 +5,4 @@ from .encoder_decoder_interface import (
     TransformerDecOnlyInterface,
 )
 
-from .lm_interface import TransformerLMInterface
+from .lm_interface import TransformerLMInterface, TransformerHFInterface

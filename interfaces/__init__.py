@@ -6,4 +6,5 @@ from .transformer import (
     PreTrainedEncoderVanillaDecoderInterface,
     TransformerDecOnlyInterface,
     TransformerLMInterface,
+    TransformerHFInterface
 )

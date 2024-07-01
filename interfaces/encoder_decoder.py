@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from .result import Result
 from typing import List, Optional
 
-
 @dataclass
 class EncoderDecoderResult(Result):
     outputs: torch.Tensor

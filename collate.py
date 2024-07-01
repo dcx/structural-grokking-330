@@ -50,7 +50,10 @@ class VarLengthCollate:
         elif torch.is_tensor(batch[0]):
             return self._merge_var_len_array(batch)
         elif isinstance(batch[0], list):
-            return self([torch.tensor(b) for b in batch])
+            if isinstance(batch[0][0], str):
+                return [b for b in batch]
+            else:
+                return self([torch.tensor(b) for b in batch])
         elif isinstance(batch[0], (int, float)):
             return torch.Tensor(batch)
         elif isinstance(batch[0], str):

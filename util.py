@@ -7,11 +7,26 @@ import numpy as np
 import torch
 import random
 import collate
+from itertools import chain
 
 from tqdm import tqdm
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
 import torch.nn.functional as F
+
+def convert_tree_to_tuple(tree):
+    """Convert NLTK tree to a tuple representation. """
+    def fix(t):
+        if type(t) == str:
+            return t
+        elif len(t) == 1:
+            return fix(t[0])
+        else:
+            all_children = [c for c in t]
+            return (fix(all_children[0]), fix(tuple(all_children[1:])))
+
+    return fix(tree)
+
 
 def process_split(sents, split_by_words):
     def remove_fullstop(sent_list):
@@ -216,3 +231,59 @@ def get_masking_info(tokenizer, input_strs, fn, **kwargs):
         sentence2idx_tuple.append(relative_idxs)
 
     return sentence2idx_tuple, masked_strs, input_masks
+
+def get_packed_indices(in_lens, max_sequence_len):
+    # process list of input lengths, batch them up so that each entry is as close to max_sequence_len as possible
+
+    sorted_indices = np.argsort(in_lens)
+    packed_indices = []
+
+    curr_len = 0
+    curr_elems = []
+    for idx in sorted_indices:
+        if in_lens[idx] + 1 + curr_len > max_sequence_len:
+            if curr_len == 0:
+                # current example by itself is longer than max_sequence_len
+                packed_indices.append([idx])
+                continue
+            else:
+                # add previous indices to single element of batch
+                packed_indices.append(curr_elems)
+                curr_elems = []
+                curr_len = 0
+        curr_elems.append(idx)
+        curr_len += in_lens[idx] + 1
+
+    if len(curr_elems) > 0:
+        packed_indices.append(curr_elems)
+
+    return packed_indices
+
+class PackedDataset(torch.utils.data.Dataset):
+    # Dataset to facilitate packing of inputs
+
+    def __init__(self, hf_dataset, max_sequence_len, encoder_sos):
+        self.orig_dataset = hf_dataset 
+        self.max_sequence_len = max_sequence_len 
+        self.packed_indices = get_packed_indices(hf_dataset["in_len"], max_sequence_len)
+        self.encoder_sos = encoder_sos
+
+        print(len(self.orig_dataset))
+        print(len(self.packed_indices))
+
+    def __len__(self):
+        return len(self.packed_indices)
+    
+    def __getitem__(self, idx):
+        idxs_to_consider = self.packed_indices[idx] 
+
+        return_data = {
+            "in": list(chain(*[[self.encoder_sos] + self.orig_dataset[int(_)]["in"] for _ in idxs_to_consider])),
+            "in_len": sum([self.orig_dataset[int(_)]["in_len"] + 1 for _ in idxs_to_consider]),
+            "idxs": [self.orig_dataset[int(_)]["idxs"] for _ in idxs_to_consider],
+            "string": [self.orig_dataset[int(_)]["string"] for _ in idxs_to_consider],
+            "parses": [self.orig_dataset[int(_)]["parses"] for _ in idxs_to_consider],
+            "contained_exs": len(idxs_to_consider)
+        }
+
+        return return_data

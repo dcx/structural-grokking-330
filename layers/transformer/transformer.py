@@ -9,7 +9,6 @@ from dataclasses import dataclass
 
 ActivationFunction = Callable[[torch.Tensor], torch.Tensor]
 
-
 class TransformerEncoderLayer(torch.nn.Module):
     def __init__(
         self,
@@ -18,6 +17,7 @@ class TransformerEncoderLayer(torch.nn.Module):
         dim_feedforward=2048,
         dropout=0.1,
         activation: ActivationFunction = F.relu,
+        causal_only=False
     ):
         super(TransformerEncoderLayer, self).__init__()
         self.d_model = d_model
@@ -371,6 +371,7 @@ class Transformer(torch.nn.Module):
         encoder_layer=TransformerEncoderWithLayer(),
         decoder_layer=TransformerDecoderWithLayer(),
         is_null_encoder=False,
+        causal_only=False,
         **kwargs,
     ):
         super().__init__()
@@ -380,7 +381,7 @@ class Transformer(torch.nn.Module):
             self.num_encoder_layers = 0
         else:
             self.encoder = encoder_layer(
-                num_encoder_layers, d_model, nhead, dim_feedforward, dropout, activation
+                num_encoder_layers, d_model, nhead, dim_feedforward, dropout, activation, causal_only
             )
             self.num_encoder_layers = num_encoder_layers
         self.decoder = decoder_layer(

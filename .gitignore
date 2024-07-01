@@ -14,3 +14,11 @@ dsmult.sh
 __init__.cpython*
 eval_helpers.cpython*
 tree_utils.cpython*
+*/__pycache__
+*.csv
+*.txt
+*.png
+logs
+data_utils/__MACOSX
+data_utils/babylm_data
+data_utils/sg_test_suites

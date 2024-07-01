@@ -5,6 +5,9 @@ import random
 import pickle
 import collate
 from scipy.spatial import distance
+import time
+import pdb
+from util import get_packed_indices
 
 device = torch.device("cuda")
 
@@ -156,12 +159,16 @@ def get_all_hidden_states_scratch(
     tqdm_disable=False,
     pre_tokenized=None,
     start_relax_layer=0,
-    layer_id=-1,
+    end_relax_layer=0,
+    layer_id=-1, 
     is_lm=False,
     compute_grad=False,
     spaces=True,
     diff=False,
-    slice_dict=None
+    slice_dict=None,
+    use_packing=False,
+    max_sequence_len=-1,
+    hf=False
 ):
     def relax_cond(mask, relax_mask, num_layers):
         ### relax mask only masks padded stuff
@@ -170,65 +177,122 @@ def get_all_hidden_states_scratch(
         #### relax_mask from num_layers - end_relax_layer to num_layers - 1
         #### mask from start_relax_layer to num_layers - end_layers - 1
         return [relax_mask] * start_relax_layer + [mask] * (
-            num_layers - start_relax_layer
-        )
+            num_layers - start_relax_layer - end_relax_layer
+        ) + [relax_mask] * end_relax_layer
 
     hidden_states_all = []
-    batch_size = 256
+    if use_packing:
+        batch_size = 8
+    else:
+        batch_size = 256
     st = 0
 
-    if(diff):
+<<<<<<< HEAD
+    # Related to old tree reg, ignore
+=======
+>>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
+    if diff:
         # Flatten slice dict
         list_slice_dict = []
         for list_slice in slice_dict:
             list_slice_dict += list_slice
 
     train_data_collator = collate.VarLengthCollate(None)
+    input_strings = input_list
 
     def tokenizer_helper(inp_slice):
-        inp_list = [tokenizer(s) for s in inp_slice]
+        if use_packing:
+            inp_list = inp_slice
+        else:
+            inp_list = [tokenizer(s) for s in inp_slice]
         in_lens = [len(s) for s in inp_list]
 
         inp_to_collate = [{"in": x, "in_len": y} for x, y in zip(inp_list, in_lens)]
         inp = train_data_collator(inp_to_collate)
         in_len = inp["in_len"].long()
         return inp["in"].transpose(0, 1), in_len
+    
+    def generate_mask(max_len, in_lens):
+        return torch.arange(max_len).expand(len(in_lens), max_len).to(in_lens.device) < in_lens.unsqueeze(1)
+    
+    # pack input list if required
+    # input: SOS s1 SOS s2 ...
+    # maintain indices of where each string ends 
+    # use that to get hidden states
 
-    num_layers = model.get_encoder_layers()
+    if use_packing:
+        slice_indices = [] # (st, en) for all strings in example
+        input_tokens = [] # properly concatenated input tokens
+        all_tokenized = [tokenizer(s) for s in input_list]
+        all_lens = np.array([len(_) for _ in all_tokenized])
+        packed_indices = get_packed_indices(all_lens, max_sequence_len)
+        packed = 0
+        for idxs in packed_indices:
+            curr_slice_indices = []
+            prev_slice_end = 0 
+            curr_input_tokens = []
+            for idx in idxs:
+                packed += 1
+                curr_slice_indices.append((prev_slice_end, prev_slice_end + all_lens[idx]))
+                prev_slice_end += all_lens[idx]
+                curr_input_tokens += all_tokenized[idx]
+            slice_indices.append(curr_slice_indices)
+            input_tokens.append(curr_input_tokens)
+
+        input_list = input_tokens
+        hidden_states_all = [None for _ in range(len(all_lens))]
+
+    # num_layers = model.get_encoder_layers()
     with tqdm(total=len(input_list), disable=tqdm_disable) as progress_bar:
         while st < len(input_list):
             en = min(len(input_list), st + batch_size)
+<<<<<<< HEAD
+            cslice = input_list[st:en] # st -> en in the other lists as well
+=======
             cslice = input_list[st:en]
-            if (diff):
+>>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
+            if diff:
                 cslice_dict = list_slice_dict[st:en]
             inputs, input_lens = tokenizer_helper(cslice)
             inputs = inputs.to(device)
             input_lens = input_lens.to(device)
             inp_len = inputs.shape[1]
             # input masks specify the inner context
-            if input_masks is not None:
-                masks_curr = input_masks[st:en]
-                masks_padded = []
-                for mask in masks_curr:
-                    mask_padded = mask + [True] * (inp_len - len(mask))
-                    masks_padded.append(mask_padded)
-                tree_mask = torch.tensor(masks_padded).to(device)
-                relax_mask = model.generate_len_mask(inp_len, input_lens).to(device)
-                mask = relax_cond(tree_mask, relax_mask, num_layers)
-                mask_mult = tree_mask.unsqueeze(-1)
+            if hf:
+                attn_mask = generate_mask(inp_len, input_lens).to(device)
+                mask_mult = ~attn_mask.unsqueeze(-1)
+                if (not compute_grad):
+                    model.eval()
+                    with torch.no_grad():
+                        outputs = [model(inputs, attention_mask=attn_mask, output_hidden_states=True).hidden_states[layer_id]]
+                else:
+                    outputs = [model(inputs, attention_mask=attn_mask, output_hidden_states=True).hidden_states[layer_id]]
             else:
                 mask = model.generate_len_mask(inp_len, input_lens).to(device)
                 mask_mult = mask.unsqueeze(-1)
-            if (not compute_grad):
-                model.eval()
-                with torch.no_grad():
+                if (not compute_grad):
+                    model.eval()
+                    with torch.no_grad():
+                        outputs = [model.encoder_only(inputs, mask, layer_id=layer_id)]
+                else:
                     outputs = [model.encoder_only(inputs, mask, layer_id=layer_id)]
-            else:
-                outputs = [model.encoder_only(inputs, mask, layer_id=layer_id)]
+            
+            # pdb.set_trace()
 
             # remove vectors for masked stuff
             # REMEMBER: mask is 1 if the token is not attended to, and 0 if the token is attended to.
             outputs = [hs * (~mask_mult) for hs in outputs]
+<<<<<<< HEAD
+
+            if use_packing:
+                # retrieve individual string representations from the packed strings
+                for idx in range(st, en):
+                    curr_chosen_indices = packed_indices[idx]
+                    curr_slice_indices = slice_indices[idx]
+                    for iidx, _ in enumerate(curr_chosen_indices):
+                        if (not compute_grad):
+                            hidden_states_all[_] = [outputs[0][idx-st][curr_slice_indices[iidx][0] : curr_slice_indices[iidx][1], :].cpu().numpy()]
+=======
             for idx, _ in enumerate(cslice):
                 if (not compute_grad):
                     hidden_states = [outputs[0][idx].cpu().numpy()]
@@ -238,16 +302,40 @@ def get_all_hidden_states_scratch(
                     # the first thing is the [CLS] or [start id] which we ignore
                     # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
                     if is_lm:
-                        if (diff):
+                        if diff:
+                            # Difference-based SCI score computation
                             hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
+>>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                         else:
-                            hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
+                            hidden_states_all[_] = [outputs[0][idx-st][curr_slice_indices[iidx][0] : curr_slice_indices[iidx][1], :]]
+            else:
+                for idx, _ in enumerate(cslice):
+                    if (not compute_grad):
+                        hidden_states = [outputs[0][idx].cpu().numpy()]
                     else:
-                        if (diff):
+<<<<<<< HEAD
+                        hidden_states = [outputs[0][idx]]
+
+                    # No need for changes here, old tree reg will never be run with packing
+                    if sum_all:
+                        # the first thing is the [CLS] or [start id] which we ignore
+                        # for non-LMS, the second thing is the [EOS] token which we also ignore.
+                        if is_lm:
+                            if (diff):
+                                hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
+                            else:
+                                hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
+=======
+                        if diff:
+                            # Difference-based SCI score computation
                             hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
+>>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                         else:
-                            hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
-                hidden_states_all.append(hidden_states)
+                            if (diff):
+                                hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
+                            else:
+                                hidden_states = [hs[1:-1].sum(axis=0) for hs in hidden_states]
+                    hidden_states_all.append(hidden_states)
             progress_bar.update(en - st)
             st = en
 
@@ -255,7 +343,7 @@ def get_all_hidden_states_scratch(
         return hidden_states_all
     else:
         return get_word_vecs_from_subwords(
-            input_list, hidden_states_all, tokenizer, pre_tokenized, spaces=spaces
+            input_strings, hidden_states_all, tokenizer, pre_tokenized, spaces=spaces
         )
 
 
@@ -312,6 +400,7 @@ def get_word_vecs_from_subwords(
 
         hs_cumulated = [get_cumulants(hs, idxs) for hs in curr_hidden_states]
         cumulants.append(hs_cumulated)
+        # pdb.set_trace()
     return cumulants
 
 

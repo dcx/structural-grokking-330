@@ -61,8 +61,11 @@ def make_data(out_file, n_examples, min_height, max_height, max_ans):
     - n_examples: how many examples to generate in total
     - min_height: minimum height of the generated examples
     - max_height: maximum height of the generated examples
-    - exclude_strings: if not None, separate out examples that contain one of these strings
-    - exclude_file: Write the excluded examples to this file
+    - max_ans: maximum non mod-10 value the examples are allowed to have
+               rationale: we record both actual and mod-10 answer, and very big
+               numbers will cause overflow errors)
+    - FUTURE: exclude_strings: if not None, separate out examples that contain one of these strings
+    - FUTURE: exclude_file: Write the excluded examples to this file
     """
 
     parser = Lark(calc_grammar, start='expr')

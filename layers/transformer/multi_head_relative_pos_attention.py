@@ -6,7 +6,6 @@ from .multi_head_attention import AttentionMask, MultiHeadAttentionBase
 import layers
 import math
 
-
 class RelativeAttentionBase(MultiHeadAttentionBase):
     def __init__(self, state_size: int, n_heads: int, dropout: float):
         super().__init__(state_size, n_heads, dropout=dropout)

@@ -2,6 +2,7 @@ import torch
 import random
 import math
 from layers import Transformer, TiedEmbedding, PositionalEncoding
+from layers.transformer import RelativeTransformer, RotaryTransformer
 from typing import Callable, Optional
 
 
@@ -30,7 +31,7 @@ class TransformerLM(torch.nn.Module):
         n_input_tokens: int,  # in_vocab_size
         state_size: int = 512,  # vec_dim
         n_heads: int = 8, # n_heads
-        ff_multiplier: float = 1,
+        ff_multiplier: float = 8,
         max_len: int = 5000,
         transformer=Transformer,
         tied_embedding: bool = False,
@@ -39,6 +40,11 @@ class TransformerLM(torch.nn.Module):
         embedding_init: str = "pytorch",
         scale_mode: str = "none",
         use_token_labels: bool = False,
+        embedding_dropout: int = -1.0,
+        output_dropout: int = -1.0,
+        relative: bool = False,
+        rotary: bool = False,
+        causal_only: bool = False,
         **kwargs
     ):
         """
@@ -60,7 +66,8 @@ class TransformerLM(torch.nn.Module):
         self.state_size = state_size
         self.embedding_init = embedding_init
         self.n_heads = n_heads
-        self.ff_multiplier = ff_multiplier
+        # self.ff_multiplier = ff_multiplier
+        self.ff_multiplier = n_heads
         self.n_input_tokens = n_input_tokens
         self.scale_mode = scale_mode
         self.pos = pos_embeddig or PositionalEncoding(
@@ -71,9 +78,24 @@ class TransformerLM(torch.nn.Module):
         )
 
         self.register_buffer("int_seq", torch.arange(max_len, dtype=torch.long))
+        self.relative = relative
+        if relative:
+            transformer = RelativeTransformer
+        elif rotary:
+            transformer = RotaryTransformer
+        else:
+            transformer = Transformer
         self.construct(transformer, **kwargs)
         self.reset_parameters()
         # need this flag for the training loop helpers
+        if embedding_dropout != -1.0:
+            self.embedding_dropout = torch.nn.Dropout(embedding_dropout)
+        else:
+            self.embedding_dropout = None
+        if output_dropout != -1.0:
+            self.output_dropout = torch.nn.Dropout(output_dropout)
+        else:
+            self.output_dropout = None
         self.mode = "lm"
 
     def construct(self, transformer, **kwargs):
@@ -118,14 +140,23 @@ class TransformerLM(torch.nn.Module):
         src_len: torch.Tensor,
     ) -> TransformerResult:
         in_len_mask = self.generate_len_mask(src.shape[1], src_len)
+
         res = self.trafo(src, tgt=None, src_length_mask=in_len_mask)
+
+        if self.output_dropout is not None:
+            res = self.output_dropout(res)
+        
         return TransformerResult.create(self.output_map(res), src_len)
 
     def pos_embed(self, t: torch.Tensor, offset: int) -> torch.Tensor:
         if self.scale_mode == "opennmt":
             t = t * math.sqrt(t.shape[-1])
 
-        return self.pos(t, offset)
+        if (self.relative):
+            # positional encoding goes inside attention layer
+            return t
+        else:
+            return self.pos(t, offset)
 
     def get_encoder_layers(self):
         return self.trafo.num_encoder_layers
@@ -236,5 +267,6 @@ class TransformerLM(torch.nn.Module):
         :return: prediction of the target tensor. Shape [N, T, C_out]
         """
         src = self.pos_embed(self.input_embed(src), 0)
-        ### we are only going to ever use this LM to measure perplexity / surprisal, so it's ok
+        if self.embedding_dropout is not None:
+            src = self.embedding_dropout(src)
         return self.run_teacher_forcing(src, src_len)

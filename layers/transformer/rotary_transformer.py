@@ -1,4 +1,3 @@
-
 from typing import Optional
 import torch
 import torch.nn
@@ -7,12 +6,14 @@ from .transformer import ActivationFunction
 from .multi_head_relative_pos_attention import FixedRelativeMultiheadAttention, AttentionMask
 from .multi_head_attention import MultiHeadAttention
 from .transformer import Transformer, TransformerEncoderWithLayer, TransformerDecoderWithLayer
+from rotary_embedding_torch import RotaryEmbedding
+from .multi_head_rotary_pos_attention import RotaryMultiheadAttention, AttentionMask
 
 
-class RelativeTransformerEncoderLayer(torch.nn.Module):
+class RotaryTransformerEncoderLayer(torch.nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation: ActivationFunction = F.relu, causal_only=False):
         super().__init__()
-        self.self_attn = FixedRelativeMultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn = RotaryMultiheadAttention(d_model, nhead, dropout=dropout, causal_only=causal_only)
         self.linear1 = torch.nn.Linear(d_model, dim_feedforward)
         self.dropout = torch.nn.Dropout(dropout)
         self.linear2 = torch.nn.Linear(dim_feedforward, d_model)
@@ -28,7 +29,6 @@ class RelativeTransformerEncoderLayer(torch.nn.Module):
         self.reset_parameters()
 
     def forward(self, src: torch.Tensor, mask: Optional[torch.Tensor] = None, pos_mask: Optional[torch.Tensor] = None, **kwargs) -> torch.Tensor:
-        # print('here')
         src2 = self.self_attn(src, src, AttentionMask(mask, pos_mask))
         src = src + self.dropout1(src2)
         src = self.norm1(src)
@@ -43,11 +43,11 @@ class RelativeTransformerEncoderLayer(torch.nn.Module):
         torch.nn.init.xavier_uniform_(self.linear2.weight)
 
 
-class RelativeTransformerDecoderLayer(torch.nn.Module):
+class RotaryTransformerDecoderLayer(torch.nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation: ActivationFunction = F.relu):
         super().__init__()
 
-        self.self_attn = FixedRelativeMultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn = RotaryMultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn = MultiHeadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
         self.linear1 = torch.nn.Linear(d_model, dim_feedforward)
@@ -86,11 +86,11 @@ class RelativeTransformerDecoderLayer(torch.nn.Module):
         torch.nn.init.xavier_uniform_(self.linear2.weight)
 
 
-class RelativeTransformer(Transformer):
+class RotaryTransformer(Transformer):
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
-                 activation: ActivationFunction = F.relu, **kwargs):
+                 activation: ActivationFunction = F.relu, causal_only: bool = False, **kwargs):
 
         super().__init__(d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, activation,
-                         TransformerEncoderWithLayer(RelativeTransformerEncoderLayer),
-                         TransformerDecoderWithLayer(RelativeTransformerDecoderLayer))
+                         TransformerEncoderWithLayer(RotaryTransformerEncoderLayer),
+                         TransformerDecoderWithLayer(RotaryTransformerDecoderLayer), causal_only = causal_only)
