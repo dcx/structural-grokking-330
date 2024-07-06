@@ -11,6 +11,7 @@ from data_utils.text_helpers import build_datasets_pushdown
 from train_transformers import get_base_transformer_lm, get_base_transformer_hf
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import pushdown_util
 
 import torch
 import os
@@ -358,6 +359,8 @@ def main():
     avg_acc = 0
     parse_acc = 0
     tot = 0
+    logprobs = []
+    lengths = []
     for filename in os.listdir('/afs/cs.stanford.edu/u/ananjan/grokking-330/structural-grokking-330/data_utils/sg_test_suites'):
         print(filename)
         f = os.path.join('/afs/cs.stanford.edu/u/ananjan/grokking-330/structural-grokking-330/data_utils/sg_test_suites', filename)
@@ -384,6 +387,17 @@ def main():
                         display_parse(predicted_parse[0])
                 except:
                     nexcept += 1
+        
+        for ex in test_suite_parser.meta_data['data']:
+            print(ex.values())
+            curr_logprobs = pushdown_util.make_preds_base_model(
+                        lm, in_vocab, ex.values(), hf=(True if args.hf else False)
+                    )
+            print(curr_logprobs.shape)
+
+            total_logprobs = np.sum(curr_logprobs[:][:-1])
+            logprobs.append(total_logprobs)
+            lengths.append(len(sentence.split(" ")))
 
         avg_acc += acc / len(test_suite_parser.answers)
         tot += 1
@@ -395,6 +409,9 @@ def main():
     print('Aggregated Score')
     print(avg_acc/tot)
     # print(parse_acc/tot)
+
+    print('Perplexity')
+    print(np.exp(-sum(logprobs) / sum(lengths)))
 
 if __name__ == "__main__":
     main()

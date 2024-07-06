@@ -271,7 +271,6 @@ def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
         function: The corresponding callback function.
     """
 
-<<<<<<< HEAD
     # CHANGES REQUIRED HERE
     if not args.callback:
         return None
@@ -295,8 +294,6 @@ def get_callback_fn(args, language_model: bool, model, in_vocab, datasets):
 
     return dataset_callbacks.get(args.dataset, lambda split: Exception("Invalid dataset"))
 
-=======
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
 def get_regularizer(args, in_vocab):
     """
     Get tree projection regularizer if required.

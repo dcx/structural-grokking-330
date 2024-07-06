@@ -346,7 +346,6 @@ def train_loop(
                     accum_strings += curr_batch_dict['string']
 
                 # Tree regularizer!
-<<<<<<< HEAD
                 broken_acc = None
                 if num_steps % regularizer_steps == 0 and args.regularize:
                     regularizer_rel_wt = args.regularizer_rel_wt_init + num_steps * wt_step
@@ -358,10 +357,6 @@ def train_loop(
                         parse_batch_dict = curr_batch_dict
 
                     # This is for Gumbel softmax, rarely used
-=======
-                if num_steps % regularizer_steps == 0:
-                    # Linear scheduling for gumbel softmax temperature tau
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                     tau = tau_init + tau_step * num_steps
 
                     # Get strings to pass to the tree regularizer
@@ -398,7 +393,6 @@ def train_loop(
                             else:
                                 sci_charts, samples, sampled_parses, depths = regularizer.build_scores(sampled_strings, model, sampled_parses, batch=True, use_gold=use_gold)
                         else:
-<<<<<<< HEAD
                             sci_charts, samples, sampled_parses, depths = regularizer.build_scores(curr_strings, model, parses, batch=True, use_gold=use_gold)
                         
                         # get SCI scores
@@ -437,46 +431,13 @@ def train_loop(
                                 sci_loss.backward()
                                 # print(time.time() - t)
                             # print(sci_loss)
-=======
-                            sci_scores = regularizer.get_score(sci_charts, mean=False, input_str=samples, use_gold=use_gold, tau=tau)
-                        # print(sci_scores)
-                        if (use_linear):
-                            # Shikhar's linear time idea
-                            fin_sci_score = torch.mean(torch.stack([torch.abs(_) for _ in sci_scores]))
-                            sci_loss = regularizer_rel_wt * fin_sci_score
-                        else:
-                            fin_sci_score = torch.mean(torch.stack(sci_scores))
-                            sci_loss = -regularizer_rel_wt * fin_sci_score
-                        sci_loss.backward()
-                        if compute_dot:
-                            # Dot products between tree reg gradients and task loss gradients
-                            sci_grads = get_grads(model)
-                            model.model.zero_grad()
-                        accum_strings = []
-                        regularizer_steps_decay += 1
-                        if (regularizer_steps_decay % change_steps == 0):
-                            regularizer_rel_wt += regularizer_delta
-                            regularizer_rel_wt = min(0.1, regularizer_rel_wt)
-
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                 
                 # LM loss backward
                 loss_curr /= accum_steps
                 losses.append(loss_curr.item())
                 loss_curr.backward()
-<<<<<<< HEAD
 
-                # Update opim
-=======
-                if compute_dot:
-                    # Dot products between tree reg gradients and task loss gradients
-                    loss_grads = get_grads(model)
-                    avg_dot = 0
-                    for idx in range(len(loss_grads)):
-                        if (loss_grads[idx] is not None and sci_grads[idx] is not None):
-                            curr_term = torch.sum(loss_grads[idx]*sci_grads[idx])
-                            avg_dot += curr_term
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
+                # Update optim
                 if len(losses) == accum_steps:
                     torch.nn.utils.clip_grad_norm_(
                         model.model.parameters(), max_grad_norm
@@ -558,13 +519,8 @@ def train_loop(
 
                     # Save model if save_dir and save_interval has been hit
                     if (save_model and save_interval == 0):
-<<<<<<< HEAD
-                        # Always save to same directory
-                        if num_steps % 10000 == 0:
-=======
                         # Always save to same file [AN, I find this more convenient for my runs]
                         if num_steps % 100000 == 0:
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                             save_path = f"{os.path.join(save_dir, 'state')}.pt"
                             torch.save(model.model.state_dict(), save_path)
                             print(f"Saved model at step {num_steps} to {save_path}")

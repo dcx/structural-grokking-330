@@ -108,11 +108,7 @@ def build_dataset_addmult_mod10(
         n_subtrees = int(len(ds_uniques) * hold_out_p_subtrees)
         # This is not reproducible
         # held_out_subtrees = set(random.sample(ds_uniques, n_subtrees))
-<<<<<<< HEAD
-        # Quick Fix
-=======
         # Quick Fix, selection is still uniformly random
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
         held_out_subtrees = set(random.sample(sorted(list(ds_uniques)), n_subtrees))
 
         # hold out all examples that match those subtrees

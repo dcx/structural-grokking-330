@@ -187,10 +187,7 @@ def get_all_hidden_states_scratch(
         batch_size = 256
     st = 0
 
-<<<<<<< HEAD
     # Related to old tree reg, ignore
-=======
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
     if diff:
         # Flatten slice dict
         list_slice_dict = []
@@ -246,11 +243,7 @@ def get_all_hidden_states_scratch(
     with tqdm(total=len(input_list), disable=tqdm_disable) as progress_bar:
         while st < len(input_list):
             en = min(len(input_list), st + batch_size)
-<<<<<<< HEAD
             cslice = input_list[st:en] # st -> en in the other lists as well
-=======
-            cslice = input_list[st:en]
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
             if diff:
                 cslice_dict = list_slice_dict[st:en]
             inputs, input_lens = tokenizer_helper(cslice)
@@ -282,7 +275,6 @@ def get_all_hidden_states_scratch(
             # remove vectors for masked stuff
             # REMEMBER: mask is 1 if the token is not attended to, and 0 if the token is attended to.
             outputs = [hs * (~mask_mult) for hs in outputs]
-<<<<<<< HEAD
 
             if use_packing:
                 # retrieve individual string representations from the packed strings
@@ -292,20 +284,6 @@ def get_all_hidden_states_scratch(
                     for iidx, _ in enumerate(curr_chosen_indices):
                         if (not compute_grad):
                             hidden_states_all[_] = [outputs[0][idx-st][curr_slice_indices[iidx][0] : curr_slice_indices[iidx][1], :].cpu().numpy()]
-=======
-            for idx, _ in enumerate(cslice):
-                if (not compute_grad):
-                    hidden_states = [outputs[0][idx].cpu().numpy()]
-                else:
-                    hidden_states = [outputs[0][idx]]
-                if sum_all:
-                    # the first thing is the [CLS] or [start id] which we ignore
-                    # for non-LMS, the secnd thing is the [EOS] token which we also ignore.
-                    if is_lm:
-                        if diff:
-                            # Difference-based SCI score computation
-                            hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                         else:
                             hidden_states_all[_] = [outputs[0][idx-st][curr_slice_indices[iidx][0] : curr_slice_indices[iidx][1], :]]
             else:
@@ -313,7 +291,6 @@ def get_all_hidden_states_scratch(
                     if (not compute_grad):
                         hidden_states = [outputs[0][idx].cpu().numpy()]
                     else:
-<<<<<<< HEAD
                         hidden_states = [outputs[0][idx]]
 
                     # No need for changes here, old tree reg will never be run with packing
@@ -325,11 +302,6 @@ def get_all_hidden_states_scratch(
                                 hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
                             else:
                                 hidden_states = [hs[1:].sum(axis=0) for hs in hidden_states]
-=======
-                        if diff:
-                            # Difference-based SCI score computation
-                            hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
->>>>>>> b3ce4da34f2346bdda5d7496d402133864818eee
                         else:
                             if (diff):
                                 hidden_states = [hs[cslice_dict[idx][-1][-1], :].squeeze() for idx,hs in enumerate(hidden_states)]
